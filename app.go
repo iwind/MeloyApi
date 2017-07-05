@@ -71,22 +71,19 @@ func LoadApp(configDir string) {
 	fmt.Printf("start %s:%d\n", app.Host, app.Port)
 
 	//启动Server
-	s := &http.Server{
-		Addr: address,
-		Handler: nil,
-	}
-
 	go (func (apis []Api) {
+		serverMux := http.NewServeMux()
+
 		for _, api := range apis {
 			fmt.Println("load api '" + api.Path + "' from '" + api.File + "'")
 			(func (api Api) {
-				http.HandleFunc(api.Path, func (writer http.ResponseWriter, request *http.Request) {
+				serverMux.HandleFunc(api.Path, func (writer http.ResponseWriter, request *http.Request) {
 					handle(writer, request, api)
 				})
 			})(api)
 		}
 
-		s.ListenAndServe()
+		http.ListenAndServe(address, serverMux)
 	})(ApiArray)
 }
 
@@ -265,7 +262,7 @@ func handleGet(writer http.ResponseWriter, request *http.Request, api Api, addre
 	resp, err := client.Do(newRequest)
 
 	if err != nil {
-		resp.Body.Close()
+		fmt.Println("Error:" + err.Error())
 		return
 	}
 
