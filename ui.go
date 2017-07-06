@@ -1,10 +1,11 @@
 package MeloyApi
 
 import (
-	"fmt"
 	"net/http"
 	"encoding/json"
 	"io/ioutil"
+	"log"
+	"fmt"
 )
 
 type AdminConfig struct {
@@ -21,19 +22,19 @@ type ApiListResponse struct {
 func LoadUI(webDir string)  {
 	bytes, err := ioutil.ReadFile(webDir + "/app.json")
 	if err != nil {
-		fmt.Println("Error:" + err.Error())
+		log.Println("Error:" + err.Error())
 		return
 	}
 
 	var adminConfig AdminConfig
 	err = json.Unmarshal(bytes, &adminConfig)
 	if err != nil {
-		fmt.Println("Error:" + err.Error())
+		log.Println("Error:" + err.Error())
 		return
 	}
 
 	address := fmt.Sprintf("%s:%d", adminConfig.Host, adminConfig.Port)
-	fmt.Println("start " + address)
+	log.Println("start " + address)
 
 	go (func() {
 		serverMux := http.NewServeMux()
@@ -60,7 +61,14 @@ func handleData(writer http.ResponseWriter, request *http.Request) {
 	}
 }
 
-func handleUIApis(writer http.ResponseWriter, request *http.Request) {
+func handleUIApis(writer http.ResponseWriter, _ *http.Request) {
+	//统计相关
+	var arr = ApiArray
+	for index, api := range arr {
+		api.Stat = statManager.AvgStat(api.Path)
+		arr[index] = api
+	}
+
 	response := ApiListResponse{}
 	response.Data = ApiArray
 	response.Code = 200

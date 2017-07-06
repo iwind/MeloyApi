@@ -4,12 +4,13 @@ import (
 	"io"
 	"net/http"
 	"io/ioutil"
-	"fmt"
 	"encoding/json"
 	"regexp"
 	"time"
 	"strings"
 	"math/rand"
+	"log"
+	"fmt"
 )
 
 type Host struct {
@@ -35,10 +36,16 @@ type Api struct {
 	Name string
 	Description string
 	Params []ApiParam
+	Dones []string
+	Todos []string
+	IsDeprecated bool
+	Version string
 
 	AvailableAddresses []string
 	File string
 	Data string
+
+	Stat ApiStat
 }
 
 type ApiParam struct {
@@ -47,35 +54,44 @@ type ApiParam struct {
 	Description string
 }
 
+type ApiStat struct {
+	AvgMs int
+	Requests int
+}
+
 var ApiArray []Api
+var statManager StatManager
 
 func LoadApp(configDir string) {
+	//初始化统计管理器
+	statManager.Init(configDir)
+
 	servers := loadServers(configDir)
 
 	appBytes, appErr := ioutil.ReadFile(configDir + "/app.json")
 	if appErr != nil {
-		fmt.Printf("Error:%s\n", appErr)
+		log.Printf("Error:%s\n", appErr)
 		return
 	}
 
 	var app App
 	jsonError := json.Unmarshal(appBytes, &app)
 	if jsonError != nil {
-		fmt.Printf("Error:%s", jsonError)
+		log.Printf("Error:%s", jsonError)
 		return
 	}
 
 	ApiArray = loadApis(configDir, servers)
 
 	address := fmt.Sprintf("%s:%d", app.Host, app.Port)
-	fmt.Printf("start %s:%d\n", app.Host, app.Port)
+	log.Printf("start %s:%d\n", app.Host, app.Port)
 
 	//启动Server
 	go (func (apis []Api) {
 		serverMux := http.NewServeMux()
 
 		for _, api := range apis {
-			fmt.Println("load api '" + api.Path + "' from '" + api.File + "'")
+			log.Println("load api '" + api.Path + "' from '" + api.File + "'")
 			(func (api Api) {
 				serverMux.HandleFunc(api.Path, func (writer http.ResponseWriter, request *http.Request) {
 					handle(writer, request, api)
@@ -88,6 +104,8 @@ func LoadApp(configDir string) {
 }
 
 func Wait()  {
+	defer statManager.Close()
+
 	//Hold住进程
 	for {
 		time.Sleep(1 * time.Hour)
@@ -98,13 +116,13 @@ func loadServers(configDir string) (servers []Server) {
 	serverBytes, serverErr := ioutil.ReadFile(configDir + "/servers.json")
 
 	if serverErr != nil {
-		fmt.Printf("Error:%s\n", serverErr)
+		log.Printf("Error:%s\n", serverErr)
 		return
 	}
 
 	jsonErr := json.Unmarshal(serverBytes, &servers)
 	if jsonErr != nil {
-		fmt.Printf("Error:%s\n", jsonErr)
+		log.Printf("Error:%s\n", jsonErr)
 		return
 	}
 	return
@@ -113,19 +131,19 @@ func loadServers(configDir string) (servers []Server) {
 func loadApis(configDir string, servers []Server) (apis []Api) {
 	files, err := ioutil.ReadDir(configDir + "/apis")
 	if err != nil {
-		fmt.Printf("Error:%s\n", err)
+		log.Printf("Error:%s\n", err)
 		return
 	}
 
 	reg, err := regexp.Compile("\\.json$")
 	if err != nil {
-		fmt.Printf("Error:%s\n", err)
+		log.Printf("Error:%s\n", err)
 		return
 	}
 
 	dataReg, err := regexp.Compile("\\.data\\.json")
 	if err != nil {
-		fmt.Printf("Error:%s\n", err)
+		log.Printf("Error:%s\n", err)
 		return
 	}
 
@@ -145,19 +163,22 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 
 		bytes, err := ioutil.ReadFile(configDir + "/apis/" + file.Name())
 		if err != nil {
-			fmt.Printf("Error:%s:%s\n", file.Name(), err)
+			log.Printf("Error:%s:%s\n", file.Name(), err)
 			continue
 		}
 
 		var api Api
 		jsonError := json.Unmarshal(bytes, &api)
 		if jsonError != nil {
-			fmt.Printf("Error:%s:%s\n", file.Name(), jsonError)
+			log.Printf("Error:%s:%s\n", file.Name(), jsonError)
 			continue
 		}
 		api.File = file.Name()
 
 		//@TODO 校验和转换api.methods
+		for methodIndex, method := range api.Methods {
+			api.Methods[methodIndex] = strings.ToUpper(method)
+		}
 
 		//转换地址
 		for _, server := range servers {
@@ -202,7 +223,7 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 		if fileExists {
 			bytes, err := ioutil.ReadFile(dataFileName)
 			if err != nil {
-				fmt.Println("Error:" + err.Error())
+				log.Println("Error:" + err.Error())
 			} else {
 				api.Data = string(bytes)
 			}
@@ -226,7 +247,7 @@ func handle(writer http.ResponseWriter, request *http.Request, api Api) {
 	index := rand.Int() % len
 
 	//检查method
-	method := strings.ToLower(request.Method)
+	method := strings.ToUpper(request.Method)
 	if !contains(api.Methods, method) {
 		fmt.Fprintln(writer, "'" + request.Method + "' method is not supported")
 		return
@@ -234,12 +255,18 @@ func handle(writer http.ResponseWriter, request *http.Request, api Api) {
 
 	address := api.AvailableAddresses[index]
 
-	if strings.Compare(method, "get") == 0 {
+	//开始处理
+	t := time.Now().UnixNano()
+
+	if strings.Compare(method, "GET") == 0 {
 		handleGet(writer, request, api, address)
 
-	} else if strings.Compare(method, "post") == 0 {
+	} else if strings.Compare(method, "POST") == 0 {
 		handlePost(writer, request, api, address)
 	}
+
+	//统计
+	statManager.Send(api.Path, (time.Now().UnixNano() - t) / 1000000)
 
 	//fmt.Fprintln(writer, "address:" + address + " path:" + request.RequestURI + " query:" + request.URL.RawQuery)
 }
@@ -262,7 +289,7 @@ func handleGet(writer http.ResponseWriter, request *http.Request, api Api, addre
 	resp, err := client.Do(newRequest)
 
 	if err != nil {
-		fmt.Println("Error:" + err.Error())
+		log.Println("Error:" + err.Error())
 		return
 	}
 
