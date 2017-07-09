@@ -11,10 +11,14 @@ import (
 	"log"
 	"fmt"
 	"strconv"
+	"bytes"
+	"os"
 )
 
-type AppManager struct {
+const MELOY_API_VERSION = "1.0"
 
+type AppManager struct {
+	AppDir string
 }
 
 type Host struct {
@@ -79,6 +83,30 @@ var requestClient = &http.Client{}
 
 // 加载应用
 func Start(appDir string) {
+	appManager.AppDir = appDir
+
+	if appManager.isCommand() {
+		return
+	}
+
+	//写入PID
+	err := ioutil.WriteFile(appDir + "/data/pid", bytes.NewBufferString(strconv.Itoa(os.Getpid())).Bytes(), 0644)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	//日志
+	logFile, err := os.OpenFile(appManager.AppDir + "/logs/meloy.log", os.O_APPEND | os.O_WRONLY | os.O_CREATE, os.ModeAppend)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	defer logFile.Close()
+	log.SetOutput(logFile)
+
+
 	//初始化统计管理器
 	statManager.Init(appDir)
 
@@ -127,6 +155,125 @@ func Start(appDir string) {
 
 	//等待请求
 	appManager.Wait()
+}
+
+// 判断是否为命令
+func (manager *AppManager) isCommand() (isCommand bool) {
+	isCommand = true
+
+	if len(os.Args) > 1 {
+		command := os.Args[1]
+		if command == "start" {
+			manager.StartCommand()
+			return
+		} else if command == "stop" {
+			manager.StopCommand()
+			return
+		} else if command == "restart" {
+			manager.RestartCommand()
+			return
+		} else if command == "help" {
+			manager.HelpCommand()
+			return
+		} else if command == "version" {
+			manager.VersionCommand()
+			return
+		}
+
+		log.Println("unsupported args '" + strings.Join(os.Args[1:], " ") + "'")
+		return
+	}
+
+	isCommand = false
+
+	return
+}
+
+// 在后端运行
+func (manager *AppManager) StartCommand() {
+	//是否已经有进程
+	running, pid := manager.checkProcessRunning()
+	if running {
+		log.Fatal("the proccess is already running, pid:", pid)
+		return
+	}
+
+	var attr os.ProcAttr
+	process, err := os.StartProcess(os.Args[0], []string{}, &attr)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	log.Println("start:", process.Pid)
+}
+
+// 停止进程
+func (manager *AppManager) StopCommand()  {
+	log.Println("stopping the server ...")
+
+	pidFile := appManager.AppDir + "/data/pid"
+	_bytes, err := ioutil.ReadFile(pidFile)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	if len(_bytes) == 0 {
+		log.Println("ok")
+		return
+	}
+
+	pidString := string(_bytes)
+	pid, err := strconv.Atoi(pidString)
+	log.Println("pid:", pid)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	err = process.Kill()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	os.Remove(pidFile)
+
+	log.Println("ok")
+}
+
+// 重启服务
+func (manager *AppManager) RestartCommand()  {
+	manager.StopCommand()
+	time.Sleep(time.Microsecond * 100)
+	manager.StartCommand()
+}
+
+// 打印帮助
+func (manager *AppManager) HelpCommand()  {
+	fmt.Println(`Usage:
+  ./meloy-api
+  ./meloy-api start
+  ./meloy-api stop
+  ./meloy-api restart
+  ./meloy-api version
+  ./meloy-api help`)
+
+}
+
+// 打印版本信息
+func (manager *AppManager) VersionCommand()  {
+	fmt.Println("  MeloyAPI v" + MELOY_API_VERSION)
+	fmt.Println("  GitHub: https://github.com/iwind/MeloyApi")
+	fmt.Println("  Author: Liu Xiang Chao")
+	fmt.Println("  QQ: 19644627")
+	fmt.Println("  E-mail: 19644627@qq.com")
 }
 
 // 等待处理请求
@@ -190,14 +337,14 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 			continue
 		}
 
-		bytes, err := ioutil.ReadFile(appDir + "/apis/" + file.Name())
+		_bytes, err := ioutil.ReadFile(appDir + "/apis/" + file.Name())
 		if err != nil {
 			log.Printf("Error:%s:%s\n", file.Name(), err)
 			continue
 		}
 
 		var api Api
-		jsonError := json.Unmarshal(bytes, &api)
+		jsonError := json.Unmarshal(_bytes, &api)
 		if jsonError != nil {
 			log.Printf("Error:%s:%s\n", file.Name(), jsonError)
 			continue
@@ -258,11 +405,11 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 
 		fileExists, _ := FileExists(dataFileName)
 		if fileExists {
-			bytes, err := ioutil.ReadFile(dataFileName)
+			_bytes, err := ioutil.ReadFile(dataFileName)
 			if err != nil {
 				log.Println("Error:" + err.Error())
 			} else {
-				api.Mock = string(bytes)
+				api.Mock = string(_bytes)
 			}
 		}
 
@@ -422,19 +569,21 @@ func (manager *AppManager) processDirective(request *http.Request, address ApiAd
 		}
 	}
 
-	//缓存
+	//设置缓存时间
 	{
 		reg, _ := regexp.Compile("^Cache-Life-Ms")
 		if reg.MatchString(directive) {
 			life, err := strconv.Atoi(value)
 			if err != nil {
-				log.Println("cache life directive Error:" + err.Error())
+				log.Println("Cache life directive Error:" + err.Error())
 				return
 			}
 			apiConfig.cacheLifeMs = int64(life)
 			return
 		}
 	}
+
+	//设置缓存标签
 	{
 		reg, _ := regexp.Compile("^Cache-Tag")
 		if reg.MatchString(directive) {
@@ -447,7 +596,44 @@ func (manager *AppManager) processDirective(request *http.Request, address ApiAd
 		}
 	}
 
-	log.Println("undefined directive:" + directive + " value:" + value)
+	//设置要删除的缓存标签
+	{
+		reg, _ := regexp.Compile("^Cache-Delete")
+		if reg.MatchString(directive) {
+			cacheManager.DeleteTag(value)
+
+			return
+		}
+	}
+
+	log.Println("Unknown directive:" + directive + " value:" + value)
 }
 
+// 检查进程是否存在
+func (manager *AppManager) checkProcessRunning() (running bool, pid int) {
+	pidFile := appManager.AppDir + "/data/pid"
+	_bytes, err := ioutil.ReadFile(pidFile)
+	if err != nil {
+		running = false
+		return
+	}
 
+	if len(_bytes) == 0 {
+		running = false
+		return
+	}
+
+	pidString := string(_bytes)
+	pid, err = strconv.Atoi(pidString)
+	if err != nil {
+		running = false
+		return
+	}
+	_, err = os.FindProcess(pid)
+	if err != nil {
+		running = false
+		return
+	}
+	running = true
+	return
+}

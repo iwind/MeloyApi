@@ -179,15 +179,22 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 	}
 }
 
+// 处理API根目录请求
 func (manager *AdminManager)handleIndex(writer http.ResponseWriter) {
 	bytes, _ := json.Marshal(struct {
 		Code int `json:"code"`
 		Message string `json:"message"`
-		Data struct{} `json:"data"`
+		Data struct{
+			Version string `json:"version"`
+		} `json:"data"`
 	} {
 		200,
 		"Success",
-		struct{}{},
+		struct{
+			Version string `json:"version"`
+		}{
+			Version: MELOY_API_VERSION,
+		},
 	})
 	writer.Write(bytes)
 }

@@ -14,7 +14,7 @@ func main()  {
 	//加载服务器
 	appDir, _  := os.Getwd()
 
-	//启用应用
+	//启动应用
 	MeloyApi.Start(appDir)
 }
 ~~~
