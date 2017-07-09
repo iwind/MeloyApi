@@ -1,6 +1,8 @@
 package MeloyApi
 
-import "os"
+import (
+	"os"
+)
 
 func FileExists(path string) (bool, error) {
 	_, err := os.Stat(path)

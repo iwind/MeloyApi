@@ -29,46 +29,49 @@ type App struct {
 }
 
 type Api struct {
-	Path string
-	Address string
-	Methods []string
+	Path string `json:"path"`
+	Address string `json:"address"`
+	Methods []string `json:"methods"`
 
-	Name string
-	Description string
-	Params []ApiParam
-	Dones []string
-	Todos []string
-	IsDeprecated bool
-	Version string
+	Name string `json:"name"`
+	Description string `json:"description"`
+	Params []ApiParam `json:"params"`
+	Dones []string `json:"dones"`
+	Todos []string `json:"todos"`
+	IsDeprecated bool `json:"isDeprecated"`
+	Version string `json:"version"`
 
-	AvailableAddresses []string
-	File string
-	Data string
+	Addresses []ApiAddress `json:"availableAddresses"`
+	File string `json:"file"`
+	Mock string `json:"mock"`
 
-	Stat ApiStat
+	Stat ApiStat `json:"stat"`
+}
+
+type ApiAddress struct {
+	Server string
+	Host string
+	URL string
 }
 
 type ApiParam struct {
-	Name string
-	Type string
-	Description string
-}
-
-type ApiStat struct {
-	AvgMs int
-	Requests int
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Description string `json:"description"`
 }
 
 var ApiArray []Api
 var statManager StatManager
+var requestClient = &http.Client{}
 
-func LoadApp(configDir string) {
+// 加载应用
+func LoadApp(appDir string) {
 	//初始化统计管理器
-	statManager.Init(configDir)
+	statManager.Init(appDir)
 
-	servers := loadServers(configDir)
+	servers := loadServers(appDir)
 
-	appBytes, appErr := ioutil.ReadFile(configDir + "/app.json")
+	appBytes, appErr := ioutil.ReadFile(appDir + "/config/app.json")
 	if appErr != nil {
 		log.Printf("Error:%s\n", appErr)
 		return
@@ -81,7 +84,7 @@ func LoadApp(configDir string) {
 		return
 	}
 
-	ApiArray = loadApis(configDir, servers)
+	ApiArray = loadApis(appDir, servers)
 
 	address := fmt.Sprintf("%s:%d", app.Host, app.Port)
 	log.Printf("start %s:%d\n", app.Host, app.Port)
@@ -92,17 +95,25 @@ func LoadApp(configDir string) {
 
 		for _, api := range apis {
 			log.Println("load api '" + api.Path + "' from '" + api.File + "'")
-			(func (api Api) {
+
+			func (api Api) {
 				serverMux.HandleFunc(api.Path, func (writer http.ResponseWriter, request *http.Request) {
 					handle(writer, request, api)
 				})
-			})(api)
+			}(api)
 		}
 
 		http.ListenAndServe(address, serverMux)
 	})(ApiArray)
+
+	//启动Admin
+	LoadAdmin(appDir)
+
+	//等待请求
+	Wait()
 }
 
+// 等待处理请求
 func Wait()  {
 	defer statManager.Close()
 
@@ -112,8 +123,9 @@ func Wait()  {
 	}
 }
 
-func loadServers(configDir string) (servers []Server) {
-	serverBytes, serverErr := ioutil.ReadFile(configDir + "/servers.json")
+// 加载服务器列表
+func loadServers(appDir string) (servers []Server) {
+	serverBytes, serverErr := ioutil.ReadFile(appDir + "/config/servers.json")
 
 	if serverErr != nil {
 		log.Printf("Error:%s\n", serverErr)
@@ -128,8 +140,9 @@ func loadServers(configDir string) (servers []Server) {
 	return
 }
 
-func loadApis(configDir string, servers []Server) (apis []Api) {
-	files, err := ioutil.ReadDir(configDir + "/apis")
+// 加载Api列表
+func loadApis(appDir string, servers []Server) (apis []Api) {
+	files, err := ioutil.ReadDir(appDir + "/apis")
 	if err != nil {
 		log.Printf("Error:%s\n", err)
 		return
@@ -141,7 +154,7 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 		return
 	}
 
-	dataReg, err := regexp.Compile("\\.data\\.json")
+	dataReg, err := regexp.Compile("\\.mock\\.json")
 	if err != nil {
 		log.Printf("Error:%s\n", err)
 		return
@@ -161,7 +174,7 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 			continue
 		}
 
-		bytes, err := ioutil.ReadFile(configDir + "/apis/" + file.Name())
+		bytes, err := ioutil.ReadFile(appDir + "/apis/" + file.Name())
 		if err != nil {
 			log.Printf("Error:%s:%s\n", file.Name(), err)
 			continue
@@ -203,13 +216,21 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 				address := reg.ReplaceAllString(api.Address, host.Address)
 
 				if totalWeight == 0 {
-					api.AvailableAddresses = append(api.AvailableAddresses, address)
+					api.Addresses = append(api.Addresses, ApiAddress {
+						Server:server.Code,
+						Host: host.Address,
+						URL: address,
+					})
 					continue
 				}
 
 				weight := int(host.Weight * 10 / totalWeight)
 				for i := 0; i < weight; i ++ {
-					api.AvailableAddresses = append(api.AvailableAddresses, address)
+					api.Addresses = append(api.Addresses, ApiAddress {
+						Server:server.Code,
+						Host: host.Address,
+						URL: address,
+					})
 				}
 			}
 		}
@@ -217,7 +238,7 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 		//假数据
 		fileName := file.Name()
 		reg, _ := regexp.Compile("\\.json")
-		dataFileName := configDir + "/apis/" + reg.ReplaceAllString(fileName, ".data.json")
+		dataFileName := appDir + "/apis/" + reg.ReplaceAllString(fileName, ".mock.json")
 
 		fileExists, _ := FileExists(dataFileName)
 		if fileExists {
@@ -225,7 +246,7 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 			if err != nil {
 				log.Println("Error:" + err.Error())
 			} else {
-				api.Data = string(bytes)
+				api.Mock = string(bytes)
 			}
 		}
 
@@ -235,16 +256,17 @@ func loadApis(configDir string, servers []Server) (apis []Api) {
 	return
 }
 
+// 处理请求
 func handle(writer http.ResponseWriter, request *http.Request, api Api) {
-	len := len(api.AvailableAddresses)
+	countAddresses := len(api.Addresses)
 
-	if len == 0 {
+	if countAddresses == 0 {
 		fmt.Fprintln(writer, "Does not have avaiable address")
 		return
 	}
 
 	rand.Seed(time.Now().UnixNano())
-	index := rand.Int() % len
+	index := rand.Int() % countAddresses
 
 	//检查method
 	method := strings.ToUpper(request.Method)
@@ -253,101 +275,101 @@ func handle(writer http.ResponseWriter, request *http.Request, api Api) {
 		return
 	}
 
-	address := api.AvailableAddresses[index]
+	address := api.Addresses[index]
 
-	//开始处理
-	t := time.Now().UnixNano()
-
-	if strings.Compare(method, "GET") == 0 {
-		handleGet(writer, request, api, address)
-
-	} else if strings.Compare(method, "POST") == 0 {
-		handlePost(writer, request, api, address)
-	}
-
-	//统计
-	statManager.Send(api.Path, (time.Now().UnixNano() - t) / 1000000)
-
-	//fmt.Fprintln(writer, "address:" + address + " path:" + request.RequestURI + " query:" + request.URL.RawQuery)
+	beforeHook(writer, request, api, func () {
+		//开始处理
+		handleMethod(writer, request, api, address, method)
+	})
 }
 
-func handleGet(writer http.ResponseWriter, request *http.Request, api Api, address string) {
+// 转发某个方法的请求
+func handleMethod(writer http.ResponseWriter, request *http.Request, api Api, address ApiAddress, method string) {
+	t := time.Now().UnixNano()
+
 	query := request.URL.RawQuery
-	url := address
+	url := address.URL
 	if len(query) > 0 {
 		url += "?" + query
 	}
-	client := &http.Client{}
-	newRequest, err := http.NewRequest("GET", url, nil)
+	newRequest, err := http.NewRequest(method, url, nil)
 
 	if err != nil {
+		afterHook(writer, request, nil, api, err)
+		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1)
 		return
 	}
 
 	newRequest.Header = request.Header
 	newRequest.Header.Set("Meloy-Api", "1.0")
-	resp, err := client.Do(newRequest)
+	newRequest.Body = request.Body
+	resp, err := requestClient.Do(newRequest)
 
 	if err != nil {
 		log.Println("Error:" + err.Error())
+		afterHook(writer, request, nil, api, err)
+
+		//统计
+		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1)
 		return
 	}
 
-	_copyHeaders(writer, resp)
+	//调用钩子
+	afterHook(writer, request, resp, api, nil)
+
+	parseResponseHeaders(writer, resp, address, api.Path)
 
 	io.Copy(writer, resp.Body)
 	resp.Body.Close()
+
+	var errors int64 = 0
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		errors ++
+	}
+	statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, errors)
 }
 
-func handlePost(writer http.ResponseWriter, request *http.Request, api Api, address string) {
-	query := request.URL.RawQuery
-	url := address
-	if len(query) > 0 {
-		url += "?" + query
-	}
+// 分析响应头部
+func parseResponseHeaders(writer http.ResponseWriter, resp *http.Response, address ApiAddress, path string)  {
+	directiveReg, _ := regexp.Compile("^Meloy-Api-(.+)")
 
-	request.ParseMultipartForm(1024 * 1024 * 1024 * 8)
-
-	client := &http.Client{}
-	newRequest, err := http.NewRequest("POST", url, strings.NewReader(request.PostForm.Encode()))
-
-	if err != nil {
-		return
-	}
-
-	newRequest.Header = request.Header
-	newRequest.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	newRequest.Header.Set("Meloy-Api", "1.0")
-	resp, err := client.Do(newRequest)
-
-	if err != nil {
-		resp.Body.Close()
-		return
-	}
-
-	_copyHeaders(writer, resp)
-
-	io.Copy(writer, resp.Body)
-	resp.Body.Close()
-}
-
-func _copyHeaders(writer http.ResponseWriter, resp *http.Response)  {
-	for key, value := range resp.Header {
-		if len(value) != 1 {
-			continue
-		}
-
+	for key, values := range resp.Header {
 		if contains([]string { "Connection", "Server" }, key) {
 			continue
 		}
 
-		writer.Header().Set(key, value[0])
+		//处理指令
+		if directiveReg.MatchString(key) {
+			directive := directiveReg.FindStringSubmatch(key)[1]
+			processDirective(address, path, directive, values[0])
+
+			continue
+		}
+
+		for _, value := range values {
+			writer.Header().Add(key, value)
+		}
 	}
 
 	writer.Header().Set("Server", "MeloyApi")
 
 }
 
+// 处理指令
+func processDirective(address ApiAddress, path string, directive string, value string) {
+	//调试信息
+	{
+		reg, _ := regexp.Compile("^Debug")
+		if reg.MatchString(directive) {
+			statManager.SendDebug(address, path, value)
+			return
+		}
+	}
+
+	log.Println("directive:" + directive + " value:" + value)
+}
+
+// 判断slice中是否包含某个字符串
 func contains(slice []string, item string) bool {
 	set := make(map[string]struct{}, len(slice))
 	for _, s := range slice {

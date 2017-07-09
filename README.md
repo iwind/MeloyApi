@@ -12,18 +12,9 @@ import (
 
 func main()  {
 	//加载服务器
-	pwd, _  := os.Getwd()
-
-	configDir := pwd + "/apps/meloy"
-	webDir := pwd + "/web"
+	appDir, _  := os.Getwd()
 
 	//启用应用
-	MeloyApi.LoadApp(configDir)
-
-	//启用UI
-	MeloyApi.LoadUI(webDir)
-
-	//等待进行
-	MeloyApi.Wait()
+	MeloyApi.LoadApp(appDir)
 }
 ~~~
