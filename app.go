@@ -1,7 +1,6 @@
 package MeloyApi
 
 import (
-	"io"
 	"net/http"
 	"io/ioutil"
 	"encoding/json"
@@ -11,7 +10,12 @@ import (
 	"math/rand"
 	"log"
 	"fmt"
+	"strconv"
 )
+
+type AppManager struct {
+
+}
 
 type Host struct {
 	Address string
@@ -48,6 +52,11 @@ type Api struct {
 	Stat ApiStat `json:"stat"`
 }
 
+type ApiConfig struct {
+	cacheTags []string
+	cacheLifeMs int64
+}
+
 type ApiAddress struct {
 	Server string
 	Host string
@@ -61,15 +70,19 @@ type ApiParam struct {
 }
 
 var ApiArray []Api
+var adminManager AdminManager
 var statManager StatManager
+var cacheManager CacheManager
+var hookManager HookManager
+var appManager AppManager
 var requestClient = &http.Client{}
 
 // 加载应用
-func LoadApp(appDir string) {
+func Start(appDir string) {
 	//初始化统计管理器
 	statManager.Init(appDir)
 
-	servers := loadServers(appDir)
+	servers := appManager.loadServers(appDir)
 
 	appBytes, appErr := ioutil.ReadFile(appDir + "/config/app.json")
 	if appErr != nil {
@@ -84,7 +97,7 @@ func LoadApp(appDir string) {
 		return
 	}
 
-	ApiArray = loadApis(appDir, servers)
+	ApiArray = appManager.loadApis(appDir, servers)
 
 	address := fmt.Sprintf("%s:%d", app.Host, app.Port)
 	log.Printf("start %s:%d\n", app.Host, app.Port)
@@ -98,7 +111,7 @@ func LoadApp(appDir string) {
 
 			func (api Api) {
 				serverMux.HandleFunc(api.Path, func (writer http.ResponseWriter, request *http.Request) {
-					handle(writer, request, api)
+					appManager.handle(writer, request, api)
 				})
 			}(api)
 		}
@@ -107,14 +120,17 @@ func LoadApp(appDir string) {
 	})(ApiArray)
 
 	//启动Admin
-	LoadAdmin(appDir)
+	adminManager.Load(appDir)
+
+	//启动缓存
+	cacheManager.Init()
 
 	//等待请求
-	Wait()
+	appManager.Wait()
 }
 
 // 等待处理请求
-func Wait()  {
+func (manager *AppManager) Wait()  {
 	defer statManager.Close()
 
 	//Hold住进程
@@ -124,7 +140,7 @@ func Wait()  {
 }
 
 // 加载服务器列表
-func loadServers(appDir string) (servers []Server) {
+func (manager *AppManager) loadServers(appDir string) (servers []Server) {
 	serverBytes, serverErr := ioutil.ReadFile(appDir + "/config/servers.json")
 
 	if serverErr != nil {
@@ -141,7 +157,7 @@ func loadServers(appDir string) (servers []Server) {
 }
 
 // 加载Api列表
-func loadApis(appDir string, servers []Server) (apis []Api) {
+func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api) {
 	files, err := ioutil.ReadDir(appDir + "/apis")
 	if err != nil {
 		log.Printf("Error:%s\n", err)
@@ -188,7 +204,7 @@ func loadApis(appDir string, servers []Server) (apis []Api) {
 		}
 		api.File = file.Name()
 
-		//@TODO 校验和转换api.methods
+		//校验和转换api.methods
 		for methodIndex, method := range api.Methods {
 			api.Methods[methodIndex] = strings.ToUpper(method)
 		}
@@ -257,7 +273,7 @@ func loadApis(appDir string, servers []Server) (apis []Api) {
 }
 
 // 处理请求
-func handle(writer http.ResponseWriter, request *http.Request, api Api) {
+func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Request, api Api) {
 	countAddresses := len(api.Addresses)
 
 	if countAddresses == 0 {
@@ -277,26 +293,46 @@ func handle(writer http.ResponseWriter, request *http.Request, api Api) {
 
 	address := api.Addresses[index]
 
-	beforeHook(writer, request, api, func () {
+	hookManager.beforeHook(writer, request, api, func () {
 		//开始处理
-		handleMethod(writer, request, api, address, method)
+		manager.handleMethod(writer, request, api, address, method)
 	})
 }
 
 // 转发某个方法的请求
-func handleMethod(writer http.ResponseWriter, request *http.Request, api Api, address ApiAddress, method string) {
+func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *http.Request, api Api, address ApiAddress, method string) {
 	t := time.Now().UnixNano()
 
 	query := request.URL.RawQuery
+
+	//是否有缓存
+	cacheKey := request.URL.RequestURI()
+	cacheEntry, ok := cacheManager.Get(cacheKey)
+	if ok {
+		for key, values := range cacheEntry.Header {
+			for _, value := range values {
+				writer.Header().Add(key, value)
+			}
+		}
+
+		writer.Write(cacheEntry.Bytes)
+
+		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 0, 1)
+
+		return
+	}
+
+
 	url := address.URL
 	if len(query) > 0 {
 		url += "?" + query
 	}
+
 	newRequest, err := http.NewRequest(method, url, nil)
 
 	if err != nil {
-		afterHook(writer, request, nil, api, err)
-		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1)
+		hookManager.afterHook(writer, request, nil, api, err)
+		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -307,30 +343,50 @@ func handleMethod(writer http.ResponseWriter, request *http.Request, api Api, ad
 
 	if err != nil {
 		log.Println("Error:" + err.Error())
-		afterHook(writer, request, nil, api, err)
+		hookManager.afterHook(writer, request, nil, api, err)
 
 		//统计
-		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1)
+		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
 	//调用钩子
-	afterHook(writer, request, resp, api, nil)
+	hookManager.afterHook(writer, request, resp, api, nil)
 
-	parseResponseHeaders(writer, resp, address, api.Path)
+	//分析头部指令等信息
+	apiConfig := ApiConfig{
+		cacheTags: []string{ "$MeloyAPI$" + api.Path },
+	}
+	manager.parseResponseHeaders(writer, request, resp, address, api.Path, &apiConfig)
 
-	io.Copy(writer, resp.Body)
-	resp.Body.Close()
+	_bytes, err := ioutil.ReadAll(resp.Body)
+
+	defer resp.Body.Close()
+
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		return
+	}
+
+	//缓存
+	if apiConfig.cacheLifeMs > 0 {
+		cacheManager.Set(cacheKey, apiConfig.cacheTags, _bytes, writer.Header(), apiConfig.cacheLifeMs)
+	}
+
+	writer.Write(_bytes)
 
 	var errors int64 = 0
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
 		errors ++
 	}
-	statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, errors)
+
+
+	statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, errors, 0)
 }
 
 // 分析响应头部
-func parseResponseHeaders(writer http.ResponseWriter, resp *http.Response, address ApiAddress, path string)  {
+func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, request *http.Request, resp *http.Response, address ApiAddress, path string, apiConfig *ApiConfig)  {
 	directiveReg, _ := regexp.Compile("^Meloy-Api-(.+)")
 
 	for key, values := range resp.Header {
@@ -341,7 +397,7 @@ func parseResponseHeaders(writer http.ResponseWriter, resp *http.Response, addre
 		//处理指令
 		if directiveReg.MatchString(key) {
 			directive := directiveReg.FindStringSubmatch(key)[1]
-			processDirective(address, path, directive, values[0])
+			manager.processDirective(request, address, path, directive, values[0], apiConfig)
 
 			continue
 		}
@@ -356,27 +412,42 @@ func parseResponseHeaders(writer http.ResponseWriter, resp *http.Response, addre
 }
 
 // 处理指令
-func processDirective(address ApiAddress, path string, directive string, value string) {
+func (manager *AppManager) processDirective(request *http.Request, address ApiAddress, path string, directive string, value string, apiConfig *ApiConfig) {
 	//调试信息
 	{
 		reg, _ := regexp.Compile("^Debug")
 		if reg.MatchString(directive) {
-			statManager.SendDebug(address, path, value)
+			statManager.SendDebug(address, path, request.URL.RequestURI(), value)
 			return
 		}
 	}
 
-	log.Println("directive:" + directive + " value:" + value)
-}
+	//缓存
+	{
+		reg, _ := regexp.Compile("^Cache-Life-Ms")
+		if reg.MatchString(directive) {
+			life, err := strconv.Atoi(value)
+			if err != nil {
+				log.Println("cache life directive Error:" + err.Error())
+				return
+			}
+			apiConfig.cacheLifeMs = int64(life)
+			return
+		}
+	}
+	{
+		reg, _ := regexp.Compile("^Cache-Tag")
+		if reg.MatchString(directive) {
+			if apiConfig.cacheTags == nil {
+				apiConfig.cacheTags = []string{}
+			}
+			apiConfig.cacheTags = append(apiConfig.cacheTags, value)
 
-// 判断slice中是否包含某个字符串
-func contains(slice []string, item string) bool {
-	set := make(map[string]struct{}, len(slice))
-	for _, s := range slice {
-		set[s] = struct{}{}
+			return
+		}
 	}
 
-	_, ok := set[item]
-	return ok
+	log.Println("undefined directive:" + directive + " value:" + value)
 }
+
 

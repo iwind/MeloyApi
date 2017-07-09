@@ -10,6 +10,10 @@ import (
 	"strconv"
 )
 
+type AdminManager struct {
+
+}
+
 type AdminConfig struct {
 	Host string
 	Port int
@@ -36,7 +40,7 @@ var adminConfig AdminConfig
 var adminApiMapping map[string] Api
 
 // 加载Admin
-func LoadAdmin(appDir string)  {
+func (manager *AdminManager)Load(appDir string)  {
 	bytes, err := ioutil.ReadFile(appDir + "/config/admin.json")
 	if err != nil {
 		log.Println("Error:" + err.Error())
@@ -60,23 +64,21 @@ func LoadAdmin(appDir string)  {
 
 	go func() {
 		serverMux := http.NewServeMux()
-		//fs := http.FileServer(http.Dir(webDir))
-		//serverMux.Handle("/@admin/", http.StripPrefix("/@", fs))
-		serverMux.HandleFunc("/", handleAdminRequest)
+		serverMux.HandleFunc("/", manager.handleRequest)
 
 		http.ListenAndServe(address, serverMux)
 	}()
 }
 
 // 处理请求
-func handleAdminRequest(writer http.ResponseWriter, request *http.Request)  {
-	if !validateAdminRequest(writer, request) {
+func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *http.Request)  {
+	if !manager.validateRequest(writer, request) {
 		return
 	}
 
 	path := request.URL.Path
 	if path == "/@api/all" {
-		handleAdminApis(writer, request)
+		manager.handleApis(writer, request)
 		return
 	}
 
@@ -84,7 +86,7 @@ func handleAdminRequest(writer http.ResponseWriter, request *http.Request)  {
 		reg, _ := regexp.Compile("^/@mock(/.+)$")
 		matches := reg.FindStringSubmatch(path)
 		if len(matches) > 0 {
-			handleMock(writer, request, matches[1])
+			manager.handleMock(writer, request, matches[1])
 			return
 		}
 	}
@@ -93,7 +95,7 @@ func handleAdminRequest(writer http.ResponseWriter, request *http.Request)  {
 		reg, _ := regexp.Compile("^/@api/\\[(.+)]$")
 		matches := reg.FindStringSubmatch(path)
 		if len(matches) > 0 {
-			handleAdminApi(writer, request, matches[1])
+			manager.handleApi(writer, request, matches[1])
 			return
 		}
 	}
@@ -105,7 +107,7 @@ func handleAdminRequest(writer http.ResponseWriter, request *http.Request)  {
 			year, _ := strconv.Atoi(matches[2])
 			month, _ := strconv.Atoi(matches[3])
 			day, _ := strconv.Atoi(matches[4])
-			handleAdminApiDay(writer, request, matches[1], year, month, day)
+			manager.handleApiDay(writer, request, matches[1], year, month, day)
 			return
 		}
 	}
@@ -114,16 +116,60 @@ func handleAdminRequest(writer http.ResponseWriter, request *http.Request)  {
 		reg, _ := regexp.Compile("^/@api/\\[(.+)]/debug/logs$")
 		matches := reg.FindStringSubmatch(path)
 		if len(matches) > 0 {
-			handleAdminDebugLogs(writer, request, matches[1])
+			manager.handleDebugLogs(writer, request, matches[1])
 			return
 		}
 	}
 
 	{
-		reg, _ := regexp.Compile("^/@api$")
-		if reg.MatchString(path) {
-			handleAdminIndex(writer)
+		reg, _ := regexp.Compile("^/@api/\\[(.+)]/debug/flush$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			manager.handleDebugFlush(writer, request, matches[1])
+			return
+		}
+	}
 
+	{
+		reg, _ := regexp.Compile("^/@api/?$")
+		if reg.MatchString(path) {
+			manager.handleIndex(writer)
+
+			return
+		}
+	}
+
+	{
+		reg, _ := regexp.Compile("^/@cache/clear$")
+		if reg.MatchString(path) {
+			manager.handleCacheClear(writer)
+			return
+		}
+	}
+
+	{
+		reg, _ := regexp.Compile("^/@cache/\\[(.+)]/clear$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			manager.handleCacheClearPath(writer, matches[1])
+			return
+		}
+	}
+
+	{
+		reg, _ := regexp.Compile("^/@cache/tag/(.+)/delete$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			manager.handleCacheDeleteTag(writer, matches[1])
+			return
+		}
+	}
+
+	{
+		reg, _ := regexp.Compile("^/@cache/tag/(.+)")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			manager.handleCacheTagInfo(writer, matches[1])
 			return
 		}
 	}
@@ -133,27 +179,27 @@ func handleAdminRequest(writer http.ResponseWriter, request *http.Request)  {
 	}
 }
 
-func handleAdminIndex(writer http.ResponseWriter) {
+func (manager *AdminManager)handleIndex(writer http.ResponseWriter) {
 	bytes, _ := json.Marshal(struct {
-		Code int
-		Message string
-		Data struct{}
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data struct{} `json:"data"`
 	} {
 		200,
-		"OK",
+		"Success",
 		struct{}{},
 	})
 	writer.Write(bytes)
 }
 
-func handleMock(writer http.ResponseWriter, _ *http.Request, path string) {
+func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	if ok && len(api.Mock) > 0 {
 		fmt.Fprint(writer, api.Mock)
 	}
 }
 
-func handleAdminApi(writer http.ResponseWriter, _ *http.Request, path string) {
+func (manager *AdminManager)handleApi(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	var response AdminApiResponse
 	if !ok {
@@ -179,7 +225,7 @@ func handleAdminApi(writer http.ResponseWriter, _ *http.Request, path string) {
 	fmt.Fprint(writer, string(bytes))
 }
 
-func handleAdminApiDay(writer http.ResponseWriter, _ *http.Request, path string, year int, month int, day int) {
+func (manager *AdminManager)handleApiDay(writer http.ResponseWriter, _ *http.Request, path string, year int, month int, day int) {
 	apiStat := statManager.FindAvgStatForDay(path, year, month, day)
 	minutes := statManager.FindMinuteStatForDay(path, year, month, day)
 
@@ -189,6 +235,8 @@ func handleAdminApiDay(writer http.ResponseWriter, _ *http.Request, path string,
 		Data struct{
 			AvgMs int `json:"avgMs"`
 			Requests int `json:"requests"`
+			Hits int `json:"hits"`
+			Errors int `json:"errors"`
 			Minutes []ApiMinuteStat `json:"minutes"`
 		} `json:"data"`
 	}{
@@ -197,10 +245,14 @@ func handleAdminApiDay(writer http.ResponseWriter, _ *http.Request, path string,
 		Data: struct{
 			AvgMs int `json:"avgMs"`
 			Requests int `json:"requests"`
+			Hits int `json:"hits"`
+			Errors int `json:"errors"`
 			Minutes []ApiMinuteStat `json:"minutes"`
 		} {
 			AvgMs:apiStat.AvgMs,
 			Requests:apiStat.Requests,
+			Hits: apiStat.Hits,
+			Errors: apiStat.Errors,
 			Minutes:minutes,
 		},
 	})
@@ -213,8 +265,8 @@ func handleAdminApiDay(writer http.ResponseWriter, _ *http.Request, path string,
 	writer.Write(bytes)
 }
 
-func handleAdminDebugLogs(writer http.ResponseWriter, _ *http.Request, path string) {
-	logs := statManager.FindDebugLogsForDay(path)
+func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, _ *http.Request, path string) {
+	logs := statManager.FindDebugLogsForPath(path)
 	bytes, err := json.Marshal(struct {
 		Code int `json:"code"`
 		Message string `json:"message"`
@@ -241,7 +293,47 @@ func handleAdminDebugLogs(writer http.ResponseWriter, _ *http.Request, path stri
 	writer.Write(bytes)
 }
 
-func handleAdminApis(writer http.ResponseWriter, _ *http.Request) {
+func (manager *AdminManager)handleDebugFlush(writer http.ResponseWriter, _ *http.Request, _ string) {
+	err, count := statManager.FlushDebugLogs()
+	if err != nil {
+		bytes, _ := json.Marshal(struct {
+			Code    int `json:"code"`
+			Message string `json:"message"`
+			Data    struct {
+				Count int `json:"count"`
+			} `json:"data"`
+		}{
+			500,
+			err.Error(),
+			struct {
+				Count int `json:"count"`
+			} {
+				count,
+			},
+		})
+		writer.Write(bytes)
+		return
+	}
+
+	bytes, _ := json.Marshal(struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data    struct {
+			Count int `json:"count"`
+		} `json:"data"`
+	}{
+		200,
+		"Success",
+		struct {
+			Count int `json:"count"`
+		} {
+			count,
+		},
+	})
+	writer.Write(bytes)
+}
+
+func (manager *AdminManager)handleApis(writer http.ResponseWriter, _ *http.Request) {
 	//统计相关
 	var arr = ApiArray
 	for index, api := range arr {
@@ -261,8 +353,121 @@ func handleAdminApis(writer http.ResponseWriter, _ *http.Request) {
 	fmt.Fprint(writer, string(bytes))
 }
 
+func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter) {
+	count := cacheManager.ClearAll()
+
+	bytes, _ := json.Marshal(struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data struct{
+			Count int `json:"count"`
+		} `json:"data"`
+	} {
+		200,
+		"Welcome to MeloyAPI",
+		struct{
+			Count int `json:"count"`
+		}{
+			Count: count,
+		},
+	})
+	writer.Write(bytes)
+}
+
+// 清除某个API对应的所有Cache
+func (manager *AdminManager)handleCacheClearPath(writer http.ResponseWriter, path string)  {
+	count := cacheManager.DeleteTag("$MeloyAPI$" + path)
+
+	bytes, _ := json.Marshal(struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data struct{
+			Count int `json:"count"`
+		} `json:"data"`
+	} {
+		200,
+		"Success",
+		struct{
+			Count int `json:"count"`
+		}{
+			Count:count,
+		},
+	})
+	writer.Write(bytes)
+}
+
+// 删除某个标签对应的缓存
+func (manager *AdminManager)handleCacheDeleteTag(writer http.ResponseWriter, tag string) {
+	count := cacheManager.DeleteTag(tag)
+
+	bytes, _ := json.Marshal(struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data struct{
+			Count int `json:"count"`
+		} `json:"data"`
+	} {
+		200,
+		"Success",
+		struct{
+			Count int `json:"count"`
+		}{
+			Count:count,
+		},
+	})
+	writer.Write(bytes)
+}
+
+// 删除某个标签信息
+func (manager *AdminManager)handleCacheTagInfo(writer http.ResponseWriter, tag string) {
+	count, keys, ok := cacheManager.StatTag(tag)
+	if !ok {
+		bytes, _ := json.Marshal(struct {
+			Code int `json:"code"`
+			Message string `json:"message"`
+			Data struct{
+				Count int `json:"count"`
+				Keys []string `json:"keys"`
+			} `json:"data"`
+		} {
+			404,
+			"Not found",
+			struct{
+				Count int `json:"count"`
+				Keys []string `json:"keys"`
+			}{
+				Count:count,
+				Keys:keys,
+			},
+		})
+
+		writer.Write(bytes)
+	} else {
+		bytes, _ := json.Marshal(struct {
+			Code int `json:"code"`
+			Message string `json:"message"`
+			Data struct{
+				Count int `json:"count"`
+				Keys []string `json:"keys"`
+			} `json:"data"`
+		} {
+			200,
+			"Success",
+			struct{
+				Count int `json:"count"`
+				Keys []string `json:"keys"`
+			}{
+				Count:count,
+				Keys:keys,
+			},
+		})
+
+		writer.Write(bytes)
+	}
+}
+
 // 校验请求
-func validateAdminRequest(writer http.ResponseWriter, request *http.Request) bool {
+func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request *http.Request) bool {
 	//取得IP
 	reg, _ := regexp.Compile(":\\d+$")
 	ip := reg.ReplaceAllString(request.RemoteAddr, "")

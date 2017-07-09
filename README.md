@@ -15,6 +15,6 @@ func main()  {
 	appDir, _  := os.Getwd()
 
 	//启用应用
-	MeloyApi.LoadApp(appDir)
+	MeloyApi.Start(appDir)
 }
 ~~~

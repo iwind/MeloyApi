@@ -7,6 +7,7 @@ import (
 	"time"
 	"strings"
 	"fmt"
+	"sync"
 )
 
 type StatManager struct {
@@ -24,12 +25,14 @@ type StatData struct {
 	TotalMs int64
 	Requests int64
 	Errors int64
+	Hits int64
 }
 
 type DebugLog struct {
 	Server string `json:"server"`
 	Host string `json:"host"`
 	Path string `json:"path"`
+	URI string `json:"uri"`
 
 	Log string `json:"body"`
 	CreatedAt int64 `json:"createdAt"`
@@ -39,15 +42,20 @@ type ApiMinuteStat struct {
 	Hour int `json:"hour"`
 	Minute int `json:"minute"`
 	Requests int `json:"requests"`
+	Errors int `json:"errors"`
+	Hits int `json:"hits"`
 	AvgMs int `json:"avgMs"`
 }
 
 type ApiStat struct {
 	AvgMs int `json:"avgMs"`
 	Requests int `json:"requests"`
+	Hits int `json:"hits"`
+	Errors int `json:"errors"`
 }
 
 var lastTableDay string = ""
+var statMu sync.Mutex
 
 // 初始化
 func (manager *StatManager) Init(appDir string) {
@@ -60,6 +68,9 @@ func (manager *StatManager) Init(appDir string) {
 		log.Fatal("Can not open database at '" + appDir + "/data/stat.db" + "'")
 	}
 	manager.db = db
+
+	// 准备数据库表
+	manager.PrepareDailyTable()
 
 	//启动定时器，每分钟导出数据到本地
 	go func() {
@@ -96,7 +107,8 @@ func (manager *StatManager) PrepareDailyTable() bool {
 		hour integer,
 		minute integer,
 		requests integer,
-		errors integer
+		errors integer,
+		hits integer
 	);
 	CREATE INDEX IF NOT EXISTS server ON stat_%{date} (server);
 	CREATE INDEX IF NOT EXISTS host ON stat_%{date} (host);
@@ -110,6 +122,7 @@ func (manager *StatManager) PrepareDailyTable() bool {
 		server text,
 		host text,
 		path text,
+		uri text,
 		body string,
 		created_at integer
 	);
@@ -133,7 +146,7 @@ func (manager *StatManager) PrepareDailyTable() bool {
 }
 
 // 发送统计信息
-func (manager *StatManager) Send(address ApiAddress, path string, timeMs int64, errors int64) {
+func (manager *StatManager) Send(address ApiAddress, path string, timeMs int64, errors int64, hits int64) {
 	key := address.Server + "$$" + address.Host + "$$" + path
 	value, ok := manager.Data[key]
 	if !ok {
@@ -144,21 +157,24 @@ func (manager *StatManager) Send(address ApiAddress, path string, timeMs int64, 
 			timeMs,
 			1,
 			errors,
+			hits,
 		}
 	} else {
 		value.TotalMs += timeMs
 		value.Requests += 1
 		value.Errors += errors
+		value.Hits += hits
 	}
 	manager.Data[key] = value
 }
 
 // 发送调试信息
-func (manager *StatManager) SendDebug(address ApiAddress, path string, log string) {
+func (manager *StatManager) SendDebug(address ApiAddress, path string, uri string, log string) {
 	manager.DebugLogs = append(manager.DebugLogs, DebugLog{
 		address.Server,
 		address.Host,
 		path,
+		uri,
 		log,
 		time.Now().Unix(),
 	})
@@ -172,7 +188,7 @@ func (manager *StatManager) Dump() {
 	manager.Data = make(map [string] StatData)
 
 	//导数据
-	stmt, err := manager.db.Prepare("INSERT INTO stat_" + lastTableDay + " (server,host,path,ms,year,month,day,hour,minute,requests,errors) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
+	stmt, err := manager.db.Prepare("INSERT INTO stat_" + lastTableDay + " (server,host,path,ms, year,month,day,hour, minute,requests,errors,hits) VALUES (?,?,?,?, ?,?,?,?, ?,?,?,?)")
 	if err != nil {
 		log.Println("Error:" + err.Error())
 		return
@@ -182,7 +198,7 @@ func (manager *StatManager) Dump() {
 
 	now := time.Now()
 	for _, statData := range data {
-		_, err := stmt.Exec(statData.Server, statData.Host, statData.Path, statData.TotalMs / statData.Requests, now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), statData.Requests, statData.Errors)
+		_, err := stmt.Exec(statData.Server, statData.Host, statData.Path, statData.TotalMs / statData.Requests, now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), statData.Requests, statData.Errors, statData.Hits)
 		if err != nil {
 			log.Println("Error:" + err.Error())
 			continue
@@ -190,22 +206,7 @@ func (manager *StatManager) Dump() {
 	}
 
 	//导日志
-	debugLogs := manager.DebugLogs
-	manager.DebugLogs = []DebugLog{}
-
-	insertDebugStmt, err := manager.db.Prepare("INSERT INTO debug_logs_" + lastTableDay + " (server, host, path, body, created_at) VALUES (?, ?, ?, ?, ?)")
-	if err != nil {
-		log.Println("Error:" + err.Error())
-		return
-	}
-
-	for _, debugLog := range debugLogs {
-		_, err := insertDebugStmt.Exec(debugLog.Server, debugLog.Host, debugLog.Path, debugLog.Log, debugLog.CreatedAt)
-		if err != nil {
-			log.Println("Error:" + err.Error())
-			continue
-		}
-	}
+	statManager.FlushDebugLogs()
 }
 
 // 取得当天的总统计
@@ -217,10 +218,10 @@ func (manager *StatManager) AvgStat(path string) ApiStat  {
 // 取得某一天的总统计
 func (manager *StatManager) FindAvgStatForDay(path string, year int, month int, day int) ApiStat {
 	date := fmt.Sprintf("%d%02d%02d", year, month, day)
-	stmt, err := manager.db.Prepare("SELECT SUM(ms),SUM(requests) FROM stat_" + date + " WHERE path=?")
+	stmt, err := manager.db.Prepare("SELECT SUM(ms),SUM(requests),SUM(hits),SUM(errors) FROM stat_" + date + " WHERE path=?")
 	if err != nil {
 		log.Println("Error:" + err.Error())
-		return ApiStat{ AvgMs: 0, Requests: 0 }
+		return ApiStat{ AvgMs: 0, Requests: 0, Hits: 0, Errors: 0 }
 	}
 
 	defer stmt.Close()
@@ -228,16 +229,20 @@ func (manager *StatManager) FindAvgStatForDay(path string, year int, month int, 
 	row := stmt.QueryRow(path)
 	var totalMs int
 	var requests int
-	err = row.Scan(&totalMs, &requests)
+	var hits int
+	var errors int
+	err = row.Scan(&totalMs, &requests, &hits, &errors)
 
 	if err != nil {
 		//log.Println("Error:" + err.Error())
-		return ApiStat{ AvgMs: 0, Requests: 0 }
+		return ApiStat{ AvgMs: 0, Requests: 0, Hits: 0, Errors: 0 }
 	}
 
 	return ApiStat {
-		AvgMs:totalMs / requests,
-		Requests:requests,
+		AvgMs: totalMs / requests,
+		Requests: requests,
+		Hits: hits,
+		Errors: errors,
 	}
 }
 
@@ -246,7 +251,7 @@ func (manager *StatManager) FindMinuteStatForDay(path string, year int, month in
 	stats = []ApiMinuteStat{}
 
 	date := fmt.Sprintf("%d%02d%02d", year, month, day)
-	stmt, err := manager.db.Prepare("SELECT ms,requests,hour,minute FROM stat_" + date + " WHERE path=? ORDER BY id ASC")
+	stmt, err := manager.db.Prepare("SELECT ms,requests,errors,hits,hour,minute FROM stat_" + date + " WHERE path=? ORDER BY id ASC")
 	if err != nil {
 		log.Println("Error:" + err.Error())
 		return
@@ -265,16 +270,20 @@ func (manager *StatManager) FindMinuteStatForDay(path string, year int, month in
 	for rows.Next() {
 		var ms int
 		var requests int
+		var errors int
+		var hits int
 		var hour int
 		var minute int
 
-		rows.Scan(&ms, &requests, &hour, &minute)
+		rows.Scan(&ms, &requests, &errors, &hits, &hour, &minute)
 
 		stats = append(stats, ApiMinuteStat{
 			Hour: hour,
 			Minute: minute,
 			AvgMs:ms,
 			Requests:requests,
+			Errors: errors,
+			Hits:hits,
 		})
 	}
 
@@ -282,13 +291,13 @@ func (manager *StatManager) FindMinuteStatForDay(path string, year int, month in
 }
 
 // 取得某个接口的调试日志
-func (manager *StatManager) FindDebugLogsForDay(path string,) (logs []DebugLog) {
+func (manager *StatManager) FindDebugLogsForPath(path string) (logs []DebugLog) {
 	logs = []DebugLog{}
 
 	now := time.Now()
 	date := fmt.Sprintf("%d%02d%02d", now.Year(), int(now.Month()), now.Day())
 
-	stmt, err := manager.db.Prepare("SELECT server, host, path, body, created_at FROM debug_logs_" + date + " WHERE path=? ORDER BY id DESC LIMIT 100")
+	stmt, err := manager.db.Prepare("SELECT server, host, path, uri, body, created_at FROM debug_logs_" + date + " WHERE path=? ORDER BY id DESC LIMIT 100")
 	if err != nil {
 		log.Println("Error:" + err.Error())
 		return
@@ -306,20 +315,54 @@ func (manager *StatManager) FindDebugLogsForDay(path string,) (logs []DebugLog) 
 		var server string
 		var host string
 		var path string
+		var uri string
 		var body string
 		var createdAt int64
 
-		rows.Scan(&server, &host, &path, &body, &createdAt)
+		rows.Scan(&server, &host, &path, &uri, &body, &createdAt)
 
 		logs = append(logs, DebugLog {
 			server,
 			host,
 			path,
+			uri,
 			body,
 			createdAt,
 		})
 	}
 
+	return
+}
+
+// 刷新调试数据
+func (manager *StatManager) FlushDebugLogs() (err error, count int) {
+	now := time.Now()
+	date := fmt.Sprintf("%d%02d%02d", now.Year(), int(now.Month()), now.Day())
+
+	statMu.Lock()
+
+	//导日志
+	debugLogs := manager.DebugLogs
+	manager.DebugLogs = []DebugLog{}
+
+	count = len(debugLogs)
+
+	insertDebugStmt, err := manager.db.Prepare("INSERT INTO debug_logs_" + date + " (server, host, path, uri, body, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		statMu.Unlock()
+		return
+	}
+
+	for _, debugLog := range debugLogs {
+		_, err := insertDebugStmt.Exec(debugLog.Server, debugLog.Host, debugLog.Path, debugLog.URI, debugLog.Log, debugLog.CreatedAt)
+		if err != nil {
+			log.Println("Error:" + err.Error())
+			continue
+		}
+	}
+
+	statMu.Unlock()
 	return
 }
 
