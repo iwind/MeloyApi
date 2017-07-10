@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"os/exec"
+	"bufio"
+	"io"
 )
 
 type AdminManager struct {
@@ -56,11 +59,7 @@ func (manager *AdminManager)Load(appDir string)  {
 	address := fmt.Sprintf("%s:%d", adminConfig.Host, adminConfig.Port)
 	log.Println("start " + address)
 
-	//初始化应用
-	adminApiMapping = make(map [string] Api)
-	for _, api := range ApiArray {
-		adminApiMapping[api.Path] = api //@TODO 支持  /:name/:age => /abc/123
-	}
+	manager.Reload()
 
 	go func() {
 		serverMux := http.NewServeMux()
@@ -68,6 +67,14 @@ func (manager *AdminManager)Load(appDir string)  {
 
 		http.ListenAndServe(address, serverMux)
 	}()
+}
+
+// 重新加载数据
+func (manager *AdminManager)Reload() {
+	adminApiMapping = make(map [string] Api)
+	for _, api := range ApiArray {
+		adminApiMapping[api.Path] = api //@TODO 支持  /:name/:age => /abc/123
+	}
 }
 
 // 处理请求
@@ -179,8 +186,13 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 		}
 	}
 
+	if path == "/@git/pull" {
+		manager.handleGitPull(writer)
+		return
+	}
+
 	{
-		fmt.Fprint(writer, "404 page not found")
+		fmt.Fprint(writer, "404 page not found (" + path + ")")
 	}
 }
 
@@ -208,6 +220,8 @@ func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Reque
 	api, ok := adminApiMapping[path]
 	if ok && len(api.Mock) > 0 {
 		fmt.Fprint(writer, api.Mock)
+	} else {
+		writer.Write([]byte("404 page not found"))
 	}
 }
 
@@ -376,6 +390,7 @@ func (manager *AdminManager)handleReloadApis(writer http.ResponseWriter) {
 }`))
 }
 
+// 清除所有缓存
 func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter) {
 	count := cacheManager.ClearAll()
 
@@ -489,6 +504,55 @@ func (manager *AdminManager)handleCacheTagInfo(writer http.ResponseWriter, tag s
 	}
 }
 
+// 处理Git Pull命令
+func (manager *AdminManager)handleGitPull(writer http.ResponseWriter) {
+	cmd := exec.Command("sh", "-c", "cd " + appManager.AppDir + ";git pull;touch /tmp/tmp-go-file")
+
+	stdout, stdoutErr := cmd.StdoutPipe()
+	if stdoutErr != nil {
+		manager.writeErrorMessage(writer, stdoutErr)
+		return
+	}
+
+	runErr := cmd.Start()
+	reader := bufio.NewReader(stdout)
+
+	output := ""
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil || io.EOF == readErr {
+			break
+		}
+
+		output += line
+	}
+
+	cmd.Wait()
+
+	if runErr != nil {
+		manager.writeErrorMessage(writer, runErr)
+		return
+	}
+
+	//刷新数据
+	go appManager.reload()
+
+	_bytes, err := json.Marshal(struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data struct{} `json:"data"`
+	}{
+		Code: 200,
+		Message: output,
+		Data: struct{}{},
+	})
+	if err != nil {
+		log.Println(err.Error())
+	} else {
+		writer.Write(_bytes)
+	}
+}
+
 // 校验请求
 func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request *http.Request) bool {
 	//取得IP
@@ -507,4 +571,21 @@ func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request 
 		}
 	}
 	return true
+}
+
+func (manager *AdminManager)writeErrorMessage(writer http.ResponseWriter, err error) {
+	_bytes, err := json.Marshal(struct {
+		Code int `json:"code"`
+		Message string `json:"message"`
+		Data struct{} `json:"data"`
+	}{
+		Code: 500,
+		Message: err.Error(),
+		Data: struct{}{},
+	})
+	if err != nil {
+		log.Println(err.Error())
+	} else {
+		writer.Write(_bytes)
+	}
 }

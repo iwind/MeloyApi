@@ -122,7 +122,13 @@ func Start(appDir string) {
 			if sig == syscall.SIGHUP {
 				appManager.reload()
 			} else {
-				os.Exit(0)
+				pidFile := appManager.AppDir + "/data/pid"
+				exist, _ := FileExists(pidFile)
+				if exist {
+					os.Remove(pidFile)
+				}
+
+				os.Exit(1)
 			}
 		}
 	}()
@@ -146,11 +152,11 @@ func Start(appDir string) {
 	address := fmt.Sprintf("%s:%d", app.Host, app.Port)
 	log.Printf("start %s:%d\n", app.Host, app.Port)
 
+	//加载数据
+	appManager.reload()
+
 	//启动Server
-
 	go func () {
-		appManager.reload()
-
 		http.ListenAndServe(address, serverMux)
 	}()
 
@@ -186,10 +192,10 @@ func (manager *AppManager) isCommand() (isCommand bool) {
 			manager.IsDebug = true
 			isCommand = false
 			return
-		} else if command == "help" {
+		} else if command == "help" || command == "-h" || command == "-help" {
 			manager.HelpCommand()
 			return
-		} else if command == "version" {
+		} else if command == "version" || command == "-v" {
 			manager.VersionCommand()
 			return
 		}
@@ -329,6 +335,9 @@ func (manager *AppManager) reload() {
 			}
 		}(api)
 	}
+
+	//刷新管理数据
+	adminManager.Reload()
 }
 
 // 等待处理请求
@@ -425,13 +434,17 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 				totalWeight += host.Weight
 			}
 
+			//支持变量 %{server.服务器代号}, %{api.path}
 			reg, _ := regexp.Compile("%{server." + server.Code + "}")
+			pathReg, _ := regexp.Compile("%\\{api.path}")
+
 			if !reg.MatchString(api.Address) {
 				continue
 			}
 
 			for _, host := range server.Hosts {
 				address := reg.ReplaceAllString(api.Address, host.Address)
+				address = pathReg.ReplaceAllString(address, api.Path)
 
 				if totalWeight == 0 {
 					api.Addresses = append(api.Addresses, ApiAddress {

@@ -65,7 +65,7 @@ func (manager *StatManager) Init(appDir string) {
 	//启动数据库
 	db, err := sql.Open("sqlite3", appDir + "/data/stat.db")
 	if err != nil {
-		log.Fatal("Can not open database at '" + appDir + "/data/stat.db" + "'")
+		log.Fatal("Can not open database at '" + appDir + "/data/stat.db" + "':", err.Error())
 	}
 	manager.db = db
 
