@@ -13,12 +13,15 @@ import (
 	"strconv"
 	"bytes"
 	"os"
+	"syscall"
+	"os/signal"
 )
 
 const MELOY_API_VERSION = "1.0"
 
 type AppManager struct {
 	AppDir string
+	IsDebug bool
 }
 
 type Host struct {
@@ -80,6 +83,8 @@ var cacheManager CacheManager
 var hookManager HookManager
 var appManager AppManager
 var requestClient = &http.Client{}
+var apiHandlers ApiHandlers = ApiHandlers{}
+var serverMux = http.NewServeMux()
 
 // 加载应用
 func Start(appDir string) {
@@ -97,20 +102,33 @@ func Start(appDir string) {
 	}
 
 	//日志
-	logFile, err := os.OpenFile(appManager.AppDir + "/logs/meloy.log", os.O_APPEND | os.O_WRONLY | os.O_CREATE, os.ModeAppend)
-	if err != nil {
-		log.Fatal(err)
-		return
+	if !appManager.IsDebug {
+		logFile, err := os.OpenFile(appManager.AppDir + "/logs/meloy.log", os.O_APPEND | os.O_WRONLY | os.O_CREATE, os.ModeAppend)
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		defer logFile.Close()
+		log.SetOutput(logFile)
 	}
 
-	defer logFile.Close()
-	log.SetOutput(logFile)
-
+	//重载信号
+	signalsChannel := make(chan os.Signal, 1024)
+	signal.Notify(signalsChannel, syscall.SIGINT, syscall.SIGHUP)
+	go func() {
+		for {
+			sig := <-signalsChannel
+			if sig == syscall.SIGHUP {
+				appManager.reload()
+			} else {
+				os.Exit(0)
+			}
+		}
+	}()
 
 	//初始化统计管理器
 	statManager.Init(appDir)
-
-	servers := appManager.loadServers(appDir)
 
 	appBytes, appErr := ioutil.ReadFile(appDir + "/config/app.json")
 	if appErr != nil {
@@ -125,27 +143,16 @@ func Start(appDir string) {
 		return
 	}
 
-	ApiArray = appManager.loadApis(appDir, servers)
-
 	address := fmt.Sprintf("%s:%d", app.Host, app.Port)
 	log.Printf("start %s:%d\n", app.Host, app.Port)
 
 	//启动Server
-	go (func (apis []Api) {
-		serverMux := http.NewServeMux()
 
-		for _, api := range apis {
-			log.Println("load api '" + api.Path + "' from '" + api.File + "'")
-
-			func (api Api) {
-				serverMux.HandleFunc(api.Path, func (writer http.ResponseWriter, request *http.Request) {
-					appManager.handle(writer, request, api)
-				})
-			}(api)
-		}
+	go func () {
+		appManager.reload()
 
 		http.ListenAndServe(address, serverMux)
-	})(ApiArray)
+	}()
 
 	//启动Admin
 	adminManager.Load(appDir)
@@ -171,6 +178,13 @@ func (manager *AppManager) isCommand() (isCommand bool) {
 			return
 		} else if command == "restart" {
 			manager.RestartCommand()
+			return
+		} else if command == "reload" {
+			manager.ReloadCommand()
+			return
+		} else if command == "debug" {
+			manager.IsDebug = true
+			isCommand = false
 			return
 		} else if command == "help" {
 			manager.HelpCommand()
@@ -212,26 +226,7 @@ func (manager *AppManager) StartCommand() {
 func (manager *AppManager) StopCommand()  {
 	log.Println("stopping the server ...")
 
-	pidFile := appManager.AppDir + "/data/pid"
-	_bytes, err := ioutil.ReadFile(pidFile)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-
-	if len(_bytes) == 0 {
-		log.Println("ok")
-		return
-	}
-
-	pidString := string(_bytes)
-	pid, err := strconv.Atoi(pidString)
-	log.Println("pid:", pid)
-	if err != nil {
-		log.Fatal(err)
-		return
-	}
-	process, err := os.FindProcess(pid)
+	process, err := manager.findRunningProcess()
 	if err != nil {
 		log.Fatal(err)
 		return
@@ -243,6 +238,7 @@ func (manager *AppManager) StopCommand()  {
 		return
 	}
 
+	pidFile := appManager.AppDir + "/data/pid"
 	os.Remove(pidFile)
 
 	log.Println("ok")
@@ -255,15 +251,48 @@ func (manager *AppManager) RestartCommand()  {
 	manager.StartCommand()
 }
 
+// 重新加载Api
+func (manager *AppManager) ReloadCommand() {
+	process, err := manager.findRunningProcess()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+
+	err = process.Signal(syscall.SIGHUP)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Println("api reloaded successfully")
+}
+
 // 打印帮助
 func (manager *AppManager) HelpCommand()  {
 	fmt.Println(`Usage:
   ./meloy-api
+  	Start server sliently
+
+  ./meloy-api debug
+  	Start server in debug mode
+
   ./meloy-api start
+  	Start server in system background
+
   ./meloy-api stop
+  	Stop server
+
   ./meloy-api restart
+  	Restart server
+
+  ./meloy-api reload
+  	Reload api configurations
+
   ./meloy-api version
-  ./meloy-api help`)
+  	Show api version
+
+  ./meloy-api help
+  	Show this help`)
 
 }
 
@@ -274,6 +303,32 @@ func (manager *AppManager) VersionCommand()  {
 	fmt.Println("  Author: Liu Xiang Chao")
 	fmt.Println("  QQ: 19644627")
 	fmt.Println("  E-mail: 19644627@qq.com")
+}
+
+// 重新加载API配置
+func (manager *AppManager) reload() {
+	servers := appManager.loadServers(manager.AppDir)
+	ApiArray = appManager.loadApis(manager.AppDir, servers)
+
+	for _, handler := range apiHandlers {
+		handler.Enabled = false
+	}
+
+	for _, api := range ApiArray {
+		log.Println("load api '" + api.Path + "' from '" + api.File + "'")
+
+		func (api Api) {
+			handler, ok := apiHandlers[api.Path]
+			if ok {
+				handler.Enabled = true
+				manager.copyApi(handler.Api, api)
+			} else {
+				apiHandlers.HandleFunc(serverMux, &api, func(writer http.ResponseWriter, request *http.Request) {
+					appManager.handle(writer, request, &api)
+				})
+			}
+		}(api)
+	}
 }
 
 // 等待处理请求
@@ -420,7 +475,7 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 }
 
 // 处理请求
-func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Request, api Api) {
+func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Request, api *Api) {
 	countAddresses := len(api.Addresses)
 
 	if countAddresses == 0 {
@@ -433,7 +488,7 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 
 	//检查method
 	method := strings.ToUpper(request.Method)
-	if !contains(api.Methods, method) {
+	if !containsString(api.Methods, method) {
 		fmt.Fprintln(writer, "'" + request.Method + "' method is not supported")
 		return
 	}
@@ -447,7 +502,7 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 }
 
 // 转发某个方法的请求
-func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *http.Request, api Api, address ApiAddress, method string) {
+func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *http.Request, api *Api, address ApiAddress, method string) {
 	t := time.Now().UnixNano()
 
 	query := request.URL.RawQuery
@@ -537,7 +592,7 @@ func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, requ
 	directiveReg, _ := regexp.Compile("^Meloy-Api-(.+)")
 
 	for key, values := range resp.Header {
-		if contains([]string { "Connection", "Server" }, key) {
+		if containsString([]string { "Connection", "Server" }, key) {
 			continue
 		}
 
@@ -635,5 +690,55 @@ func (manager *AppManager) checkProcessRunning() (running bool, pid int) {
 		return
 	}
 	running = true
+	return
+}
+
+// 拷贝API信息
+func (manager *AppManager) copyApi(to *Api, from Api) {
+	to.Path = from.Path
+	to.Methods = from.Methods
+	to.Address = from.Address
+
+	to.Name = from.Name
+	to.Description = from.Description
+	to.Params = from.Params
+	to.Dones = from.Dones
+	to.Todos = from.Todos
+	to.IsDeprecated = from.IsDeprecated
+	to.Version = from.Version
+
+	to.Addresses = from.Addresses
+	to.File = from.File
+	to.Mock = from.Mock
+
+	to.Stat = from.Stat
+}
+
+func (manager *AppManager) findRunningProcess() (process *os.Process, err error) {
+	pidFile := appManager.AppDir + "/data/pid"
+	_bytes, err := ioutil.ReadFile(pidFile)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
+	if len(_bytes) == 0 {
+		log.Println("ok")
+		return
+	}
+
+	pidString := string(_bytes)
+	pid, err := strconv.Atoi(pidString)
+	log.Println("pid:", pid)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+	process, err = os.FindProcess(pid)
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
+
 	return
 }

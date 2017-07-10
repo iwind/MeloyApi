@@ -82,6 +82,11 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 		return
 	}
 
+	if path == "/@api/reload" {
+		manager.handleReloadApis(writer)
+		return
+	}
+
 	{
 		reg, _ := regexp.Compile("^/@mock(/.+)$")
 		matches := reg.FindStringSubmatch(path)
@@ -360,6 +365,17 @@ func (manager *AdminManager)handleApis(writer http.ResponseWriter, _ *http.Reque
 	fmt.Fprint(writer, string(bytes))
 }
 
+// 刷新API配置
+func (manager *AdminManager)handleReloadApis(writer http.ResponseWriter) {
+	appManager.reload()
+
+	writer.Write([]byte(`{
+	"code": 200,
+	"message": "Success",
+	"data": null
+}`))
+}
+
 func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter) {
 	count := cacheManager.ClearAll()
 
@@ -479,7 +495,7 @@ func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request 
 	reg, _ := regexp.Compile(":\\d+$")
 	ip := reg.ReplaceAllString(request.RemoteAddr, "")
 	if adminConfig.Allow.Clients != nil && len(adminConfig.Allow.Clients) > 0 {
-		if !contains(adminConfig.Allow.Clients, ip) {
+		if !containsString(adminConfig.Allow.Clients, ip) {
 			if ip != "[::1]" {
 				fmt.Fprint(writer, `{
 					"code": "401",
