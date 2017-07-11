@@ -216,15 +216,22 @@ func (manager *AdminManager)handleIndex(writer http.ResponseWriter) {
 	writer.Write(bytes)
 }
 
+// 输出模拟数据
 func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	if ok && len(api.Mock) > 0 {
-		fmt.Fprint(writer, api.Mock)
+		//删除注释以避免JSON解析错误
+		mock := api.Mock
+		reg, _ := regexp.Compile("\n\\s*//.+")
+		mock = reg.ReplaceAllString(mock, "")
+
+		fmt.Fprint(writer, mock)
 	} else {
 		writer.Write([]byte("404 page not found"))
 	}
 }
 
+// 输出某个API信息
 func (manager *AdminManager)handleApi(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	var response AdminApiResponse

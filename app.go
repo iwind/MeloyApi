@@ -102,7 +102,7 @@ func Start(appDir string) {
 	}
 
 	//日志
-	if !appManager.IsDebug {
+	if len(os.Args) != 1 && !appManager.IsDebug {
 		logFile, err := os.OpenFile(appManager.AppDir + "/logs/meloy.log", os.O_APPEND | os.O_WRONLY | os.O_CREATE, os.ModeAppend)
 		if err != nil {
 			log.Fatal(err)
@@ -192,7 +192,7 @@ func (manager *AppManager) isCommand() (isCommand bool) {
 			manager.IsDebug = true
 			isCommand = false
 			return
-		} else if command == "help" || command == "-h" || command == "-help" {
+		} else if command == "help" || command == "-h" || command == "-help" || command == "--help" {
 			manager.HelpCommand()
 			return
 		} else if command == "version" || command == "-v" {
@@ -532,7 +532,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 
 		writer.Write(cacheEntry.Bytes)
 
-		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 0, 1)
+		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 0, 1)
 
 		return
 	}
@@ -547,7 +547,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 
 	if err != nil {
 		hookManager.afterHook(writer, request, nil, api, err)
-		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -561,7 +561,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		hookManager.afterHook(writer, request, nil, api, err)
 
 		//统计
-		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -580,7 +580,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 
 	if err != nil {
 		log.Println("Error:" + err.Error())
-		statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -597,7 +597,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	}
 
 
-	statManager.Send(address, api.Path, (time.Now().UnixNano() - t) / 1000000, errors, 0)
+	statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, errors, 0)
 }
 
 // 分析响应头部

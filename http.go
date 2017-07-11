@@ -4,11 +4,11 @@ import (
 	"net/http"
 )
 
-type ApiHasHandleFunc interface { //this is just so it would work for gorilla and http.ServerMux
+type ApiHasHandleFunc interface {
 	HandleFunc(pattern string, handler func(w http.ResponseWriter, req *http.Request))
 }
 
-//API处理器
+// API处理器
 type ApiHandler struct {
 	http.HandlerFunc
 	Api *Api

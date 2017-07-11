@@ -8,6 +8,7 @@ import (
 	"strings"
 	"fmt"
 	"sync"
+	"encoding/json"
 )
 
 type StatManager struct {
@@ -146,7 +147,7 @@ func (manager *StatManager) PrepareDailyTable() bool {
 }
 
 // 发送统计信息
-func (manager *StatManager) Send(address ApiAddress, path string, timeMs int64, errors int64, hits int64) {
+func (manager *StatManager) Send(address ApiAddress, path string, uri string, timeMs int64, errors int64, hits int64) {
 	key := address.Server + "$$" + address.Host + "$$" + path
 	value, ok := manager.Data[key]
 	if !ok {
@@ -166,18 +167,60 @@ func (manager *StatManager) Send(address ApiAddress, path string, timeMs int64, 
 		value.Hits += hits
 	}
 	manager.Data[key] = value
+
+	if appManager.IsDebug {
+		bytes, err := json.MarshalIndent(struct {
+			Api string
+			Address string
+			URI string
+			TimeMs int64
+			HasError bool
+			HitCache bool
+		}{
+			path,
+			address.URL,
+			uri,
+			timeMs,
+			errors > 0,
+			hits > 0,
+		}, "", "    ")
+		if err != nil {
+			log.Println(err)
+		} else {
+			log.Println(string(bytes))
+		}
+	}
 }
 
 // 发送调试信息
-func (manager *StatManager) SendDebug(address ApiAddress, path string, uri string, log string) {
+func (manager *StatManager) SendDebug(address ApiAddress, path string, uri string, _log string) {
 	manager.DebugLogs = append(manager.DebugLogs, DebugLog{
 		address.Server,
 		address.Host,
 		path,
 		uri,
-		log,
+		_log,
 		time.Now().Unix(),
 	})
+
+	if appManager.IsDebug {
+		bytes, err := json.MarshalIndent(struct {
+			Api string
+			Address string
+			URI string
+			Log string
+		}{
+			path,
+			address.URL,
+			uri,
+			_log,
+		}, "", "    ")
+		if err != nil {
+			log.Println(err)
+		} else {
+			log.Println(string(bytes))
+		}
+	}
 }
 
 // 导出数据到数据库
