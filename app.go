@@ -314,7 +314,8 @@ func (manager *AppManager) VersionCommand()  {
 // 重新加载API配置
 func (manager *AppManager) reload() {
 	servers := appManager.loadServers(manager.AppDir)
-	ApiArray = appManager.loadApis(manager.AppDir, servers)
+	ApiArray = []Api{}
+	appManager.loadApis(manager.AppDir + string(os.PathSeparator) + "apis", servers, &ApiArray)
 
 	for _, handler := range apiHandlers {
 		handler.Enabled = false
@@ -368,8 +369,8 @@ func (manager *AppManager) loadServers(appDir string) (servers []Server) {
 }
 
 // 加载Api列表
-func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api) {
-	files, err := ioutil.ReadDir(appDir + "/apis")
+func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api) {
+	files, err := ioutil.ReadDir(apiDir)
 	if err != nil {
 		log.Printf("Error:%s\n", err)
 		return
@@ -389,6 +390,7 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 
 	for _, file := range files {
 		if file.IsDir() {
+			manager.loadApis(apiDir + string(os.PathSeparator) + file.Name(), servers, apis)
 			continue
 		}
 
@@ -401,7 +403,7 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 			continue
 		}
 
-		_bytes, err := ioutil.ReadFile(appDir + "/apis/" + file.Name())
+		_bytes, err := ioutil.ReadFile(apiDir + string(os.PathSeparator) + file.Name())
 		if err != nil {
 			log.Printf("Error:%s:%s\n", file.Name(), err)
 			continue
@@ -469,7 +471,7 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 		//假数据
 		fileName := file.Name()
 		reg, _ := regexp.Compile("\\.json")
-		dataFileName := appDir + "/apis/" + reg.ReplaceAllString(fileName, ".mock.json")
+		dataFileName := apiDir + string(os.PathSeparator) + reg.ReplaceAllString(fileName, ".mock.json")
 
 		fileExists, _ := FileExists(dataFileName)
 		if fileExists {
@@ -481,7 +483,7 @@ func (manager *AppManager) loadApis(appDir string, servers []Server) (apis []Api
 			}
 		}
 
-		apis = append(apis, api)
+		*apis = append(*apis, api)
 	}
 
 	return
