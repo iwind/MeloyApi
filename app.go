@@ -90,6 +90,15 @@ var serverMux = http.NewServeMux()
 func Start(appDir string) {
 	appManager.AppDir = appDir
 
+	//检查data/, logs/目录是否存在
+	for _, dir := range []string { "data", "logs" } {
+		systemDir := appDir + string(os.PathSeparator) + dir
+		if exists, _ := FileExists(systemDir); !exists {
+			log.Println("create dir '" + dir + "'")
+			os.Mkdir(systemDir, 0777)
+		}
+	}
+
 	if appManager.isCommand() {
 		return
 	}
