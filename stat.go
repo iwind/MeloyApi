@@ -169,20 +169,13 @@ func (manager *StatManager) Send(address ApiAddress, path string, uri string, ti
 	manager.Data[key] = value
 
 	if appManager.IsDebug {
-		bytes, err := json.MarshalIndent(struct {
-			Api string
-			Address string
-			URI string
-			TimeMs int64
-			HasError bool
-			HitCache bool
-		}{
-			path,
-			address.URL,
-			uri,
-			timeMs,
-			errors > 0,
-			hits > 0,
+		bytes, err := json.MarshalIndent(Map {
+			"Api": path,
+			"Address": address.URL,
+			"URI": uri,
+			"TimeMs": timeMs,
+			"HasErrors": errors > 0,
+			"HitCache": hits > 0,
 		}, "", "    ")
 		if err != nil {
 			log.Println(err)
@@ -204,16 +197,11 @@ func (manager *StatManager) SendDebug(address ApiAddress, path string, uri strin
 	})
 
 	if appManager.IsDebug {
-		bytes, err := json.MarshalIndent(struct {
-			Api string
-			Address string
-			URI string
-			Log string
-		}{
-			path,
-			address.URL,
-			uri,
-			_log,
+		bytes, err := json.MarshalIndent(Map {
+			"Api": path,
+			"Address": address.URL,
+			"URI": uri,
+			"Log": _log,
 		}, "", "    ")
 		if err != nil {
 			log.Println(err)
@@ -228,7 +216,7 @@ func (manager *StatManager) Dump() {
 	data := manager.Data
 
 	//清空
-	manager.Data = make(map [string] StatData)
+	manager.Data = map [string] StatData {}
 
 	//导数据
 	stmt, err := manager.db.Prepare("INSERT INTO stat_" + lastTableDay + " (server,host,path,ms, year,month,day,hour, minute,requests,errors,hits) VALUES (?,?,?,?, ?,?,?,?, ?,?,?,?)")
@@ -396,6 +384,8 @@ func (manager *StatManager) FlushDebugLogs() (err error, count int) {
 		statMu.Unlock()
 		return
 	}
+
+	defer insertDebugStmt.Close()
 
 	for _, debugLog := range debugLogs {
 		_, err := insertDebugStmt.Exec(debugLog.Server, debugLog.Host, debugLog.Path, debugLog.URI, debugLog.Log, debugLog.CreatedAt)

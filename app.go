@@ -39,26 +39,6 @@ type App struct {
 	Port int
 }
 
-type Api struct {
-	Path string `json:"path"`
-	Address string `json:"address"`
-	Methods []string `json:"methods"`
-
-	Name string `json:"name"`
-	Description string `json:"description"`
-	Params []ApiParam `json:"params"`
-	Dones []string `json:"dones"`
-	Todos []string `json:"todos"`
-	IsDeprecated bool `json:"isDeprecated"`
-	Version string `json:"version"`
-
-	Addresses []ApiAddress `json:"availableAddresses"`
-	File string `json:"file"`
-	Mock string `json:"mock"`
-
-	Stat ApiStat `json:"stat"`
-}
-
 type ApiConfig struct {
 	cacheTags []string
 	cacheLifeMs int64
@@ -337,7 +317,7 @@ func (manager *AppManager) reload() {
 			handler, ok := apiHandlers[api.Path]
 			if ok {
 				handler.Enabled = true
-				manager.copyApi(handler.Api, api)
+				handler.Api.copyFrom(api)
 			} else {
 				apiHandlers.HandleFunc(serverMux, &api, func(writer http.ResponseWriter, request *http.Request) {
 					appManager.handle(writer, request, &api)
@@ -425,11 +405,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 			continue
 		}
 		api.File = file.Name()
-
-		//校验和转换api.methods
-		for methodIndex, method := range api.Methods {
-			api.Methods[methodIndex] = strings.ToUpper(method)
-		}
+		api.Parse()
 
 		//转换地址
 		for _, server := range servers {
@@ -520,8 +496,14 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 	address := api.Addresses[index]
 
 	hookManager.beforeHook(writer, request, api, func () {
-		//开始处理
-		manager.handleMethod(writer, request, api, address, method)
+		if api.IsAsynchronous {
+			manager.setApiHeaders(writer, api)
+			writer.Write([]byte(api.responseString))
+			go manager.handleMethod(writer, request, api, address, method)
+		} else {
+			//开始处理
+			manager.handleMethod(writer, request, api, address, method)
+		}
 	})
 }
 
@@ -541,6 +523,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 			}
 		}
 
+		manager.setApiHeaders(writer, api)
 		writer.Write(cacheEntry.Bytes)
 
 		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 0, 1)
@@ -557,6 +540,8 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	newRequest, err := http.NewRequest(method, url, nil)
 
 	if err != nil {
+		manager.setApiHeaders(writer, api)
+
 		hookManager.afterHook(writer, request, nil, api, err)
 		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
@@ -565,9 +550,19 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	newRequest.Header = request.Header
 	newRequest.Header.Set("Meloy-Api", "1.0")
 	newRequest.Body = request.Body
+
+	//超时时间
+	if api.timeoutDuration > 0 {
+		requestClient.Timeout = api.timeoutDuration
+	} else {
+		requestClient.Timeout = 30 * time.Second //@TODO 从server配置中读取
+	}
+
 	resp, err := requestClient.Do(newRequest)
 
 	if err != nil {
+		manager.setApiHeaders(writer, api)
+
 		log.Println("Error:" + err.Error())
 		hookManager.afterHook(writer, request, nil, api, err)
 
@@ -583,14 +578,20 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	apiConfig := ApiConfig{
 		cacheTags: []string{ "$MeloyAPI$" + api.Path },
 	}
-	manager.parseResponseHeaders(writer, request, resp, address, api.Path, &apiConfig)
+	manager.parseResponseHeaders(writer, request, resp, address, api, &apiConfig)
+	manager.setApiHeaders(writer, api)
 
-	_bytes, err := ioutil.ReadAll(resp.Body)
+	_bytes := []byte {}
+	if api.hasResponseString {
+		err = nil
+		_bytes = []byte(api.responseString)
+	} else {
+		_bytes, err = ioutil.ReadAll(resp.Body)
+	}
 
 	defer resp.Body.Close()
 
 	if err != nil {
-		log.Println("Error:" + err.Error())
 		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
@@ -600,19 +601,21 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		cacheManager.Set(cacheKey, apiConfig.cacheTags, _bytes, writer.Header(), apiConfig.cacheLifeMs)
 	}
 
-	writer.Write(_bytes)
+	//如果不是异步请求的，就返回请求得到的数据
+	if !api.IsAsynchronous {
+		writer.Write(_bytes)
+	}
 
 	var errors int64 = 0
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
 		errors ++
 	}
 
-
 	statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, errors, 0)
 }
 
 // 分析响应头部
-func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, request *http.Request, resp *http.Response, address ApiAddress, path string, apiConfig *ApiConfig)  {
+func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, request *http.Request, resp *http.Response, address ApiAddress, api *Api, apiConfig *ApiConfig)  {
 	directiveReg, _ := regexp.Compile("^Meloy-Api-(.+)")
 
 	for key, values := range resp.Header {
@@ -620,10 +623,14 @@ func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, requ
 			continue
 		}
 
+		if api.hasResponseString && key == "Content-Encoding" {
+			continue
+		}
+
 		//处理指令
 		if directiveReg.MatchString(key) {
 			directive := directiveReg.FindStringSubmatch(key)[1]
-			manager.processDirective(request, address, path, directive, values[0], apiConfig)
+			manager.processDirective(request, address, api.Path, directive, values[0], apiConfig)
 
 			continue
 		}
@@ -717,27 +724,7 @@ func (manager *AppManager) checkProcessRunning() (running bool, pid int) {
 	return
 }
 
-// 拷贝API信息
-func (manager *AppManager) copyApi(to *Api, from Api) {
-	to.Path = from.Path
-	to.Methods = from.Methods
-	to.Address = from.Address
-
-	to.Name = from.Name
-	to.Description = from.Description
-	to.Params = from.Params
-	to.Dones = from.Dones
-	to.Todos = from.Todos
-	to.IsDeprecated = from.IsDeprecated
-	to.Version = from.Version
-
-	to.Addresses = from.Addresses
-	to.File = from.File
-	to.Mock = from.Mock
-
-	to.Stat = from.Stat
-}
-
+// 查找正在运行的MeloyAPI进程
 func (manager *AppManager) findRunningProcess() (process *os.Process, err error) {
 	pidFile := appManager.AppDir + "/data/pid"
 	_bytes, err := ioutil.ReadFile(pidFile)
@@ -766,3 +753,16 @@ func (manager *AppManager) findRunningProcess() (process *os.Process, err error)
 
 	return
 }
+
+// 设置API头部信息
+func (manager *AppManager) setApiHeaders(writer http.ResponseWriter, api *Api) {
+	//写入Headers
+	if len(api.Headers)  == 0 {
+		return
+	}
+
+	for _, header := range api.Headers {
+		writer.Header().Set(header.Name, header.Value)
+	}
+}
+

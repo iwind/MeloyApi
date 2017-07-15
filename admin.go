@@ -27,18 +27,6 @@ type AdminConfigAllow struct {
 	Clients []string
 }
 
-type AdminApiListResponse struct {
-	Code int `json:"code"`
-	Message string `json:"message"`
-	Data []Api `json:"data"`
-}
-
-type AdminApiResponse struct {
-	Code int `json:"code"`
-	Message string `json:"message"`
-	Data Api `json:"data"`
-}
-
 var adminConfig AdminConfig
 var adminApiMapping map[string] Api
 
@@ -198,24 +186,18 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 
 // 处理API根目录请求
 func (manager *AdminManager)handleIndex(writer http.ResponseWriter) {
-	bytes, _ := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{
-			Version string `json:"version"`
-		} `json:"data"`
-	} {
-		200,
-		"Success",
-		struct{
-			Version string `json:"version"`
-		}{
-			Version: MELOY_API_VERSION,
+	bytes, _ := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"version": MELOY_API_VERSION,
 		},
 	})
+
 	writer.Write(bytes)
 }
 
+// /@api
 // 输出模拟数据
 func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
@@ -231,21 +213,22 @@ func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Reque
 	}
 }
 
+// /@api/[:path]
 // 输出某个API信息
 func (manager *AdminManager)handleApi(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
-	var response AdminApiResponse
+	var response Map
 	if !ok {
-		response = AdminApiResponse {
-			404,
-			"Not Found",
-			Api{},
+		response = Map {
+			"code": 404,
+			"message": "Not Found",
+			"data": Api{},
 		}
 	} else {
-		response = AdminApiResponse{
-			200,
-			"Success",
-			api,
+		response = Map {
+			"code": 200,
+			"message": "Success",
+			"data": api,
 		}
 	}
 
@@ -258,35 +241,21 @@ func (manager *AdminManager)handleApi(writer http.ResponseWriter, _ *http.Reques
 	fmt.Fprint(writer, string(bytes))
 }
 
+// /@api/path/year/:year/month/:month/day/:day
+// 日统计
 func (manager *AdminManager)handleApiDay(writer http.ResponseWriter, _ *http.Request, path string, year int, month int, day int) {
 	apiStat := statManager.FindAvgStatForDay(path, year, month, day)
 	minutes := statManager.FindMinuteStatForDay(path, year, month, day)
 
-	bytes, err := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{
-			AvgMs int `json:"avgMs"`
-			Requests int `json:"requests"`
-			Hits int `json:"hits"`
-			Errors int `json:"errors"`
-			Minutes []ApiMinuteStat `json:"minutes"`
-		} `json:"data"`
-	}{
-		Code: 200,
-		Message: "Success",
-		Data: struct{
-			AvgMs int `json:"avgMs"`
-			Requests int `json:"requests"`
-			Hits int `json:"hits"`
-			Errors int `json:"errors"`
-			Minutes []ApiMinuteStat `json:"minutes"`
-		} {
-			AvgMs:apiStat.AvgMs,
-			Requests:apiStat.Requests,
-			Hits: apiStat.Hits,
-			Errors: apiStat.Errors,
-			Minutes:minutes,
+	bytes, err := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"avgMs": apiStat.AvgMs,
+			"requests": apiStat.Requests,
+			"hits": apiStat.Hits,
+			"errors": apiStat.Errors,
+			"minutes": minutes,
 		},
 	})
 
@@ -298,24 +267,16 @@ func (manager *AdminManager)handleApiDay(writer http.ResponseWriter, _ *http.Req
 	writer.Write(bytes)
 }
 
+// /@api/[:path]/debug/logs
+// 打印调试日志
 func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, _ *http.Request, path string) {
 	logs := statManager.FindDebugLogsForPath(path)
-	bytes, err := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{
-			Count int `json:"count"`
-			Logs []DebugLog `json:"logs"`
-		} `json:"data"`
-	}{
-		200,
-		"Success",
-		struct{
-			Count int `json:"count"`
-			Logs []DebugLog `json:"logs"`
-		} {
-			len(logs),
-			logs,
+	bytes, err := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"count": len(logs),
+			"logs": logs,
 		},
 	})
 
@@ -329,43 +290,29 @@ func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, _ *http.
 func (manager *AdminManager)handleDebugFlush(writer http.ResponseWriter, _ *http.Request, _ string) {
 	err, count := statManager.FlushDebugLogs()
 	if err != nil {
-		bytes, _ := json.Marshal(struct {
-			Code    int `json:"code"`
-			Message string `json:"message"`
-			Data    struct {
-				Count int `json:"count"`
-			} `json:"data"`
-		}{
-			500,
-			err.Error(),
-			struct {
-				Count int `json:"count"`
-			} {
-				count,
+		bytes, _ := json.Marshal(Map {
+			"code": 500,
+			"message": err.Error(),
+			"data": Map {
+				"count": count,
 			},
 		})
 		writer.Write(bytes)
 		return
 	}
 
-	bytes, _ := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data    struct {
-			Count int `json:"count"`
-		} `json:"data"`
-	}{
-		200,
-		"Success",
-		struct {
-			Count int `json:"count"`
-		} {
-			count,
+	bytes, _ := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"count": count,
 		},
 	})
 	writer.Write(bytes)
 }
 
+// /@api/all
+// 输出所有API信息
 func (manager *AdminManager)handleApis(writer http.ResponseWriter, _ *http.Request) {
 	//统计相关
 	var arr = ApiArray
@@ -374,9 +321,11 @@ func (manager *AdminManager)handleApis(writer http.ResponseWriter, _ *http.Reque
 		arr[index] = api
 	}
 
-	response := AdminApiListResponse{}
-	response.Data = ApiArray
-	response.Code = 200
+	response := Map {
+		"code": 200,
+		"message": "Success",
+		"data": ApiArray,
+	}
 
 	bytes, err := json.Marshal(response)
 	if err != nil {
@@ -386,6 +335,7 @@ func (manager *AdminManager)handleApis(writer http.ResponseWriter, _ *http.Reque
 	fmt.Fprint(writer, string(bytes))
 }
 
+// /@api/reload
 // 刷新API配置
 func (manager *AdminManager)handleReloadApis(writer http.ResponseWriter) {
 	appManager.reload()
@@ -397,113 +347,73 @@ func (manager *AdminManager)handleReloadApis(writer http.ResponseWriter) {
 }`))
 }
 
+// /@cache/clear
 // 清除所有缓存
 func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter) {
 	count := cacheManager.ClearAll()
 
-	bytes, _ := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{
-			Count int `json:"count"`
-		} `json:"data"`
-	} {
-		200,
-		"Welcome to MeloyAPI",
-		struct{
-			Count int `json:"count"`
-		}{
-			Count: count,
+	bytes, _ := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"count": count,
 		},
 	})
 	writer.Write(bytes)
 }
 
+// /@cache/[:path]/clear
 // 清除某个API对应的所有Cache
 func (manager *AdminManager)handleCacheClearPath(writer http.ResponseWriter, path string)  {
 	count := cacheManager.DeleteTag("$MeloyAPI$" + path)
 
-	bytes, _ := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{
-			Count int `json:"count"`
-		} `json:"data"`
-	} {
-		200,
-		"Success",
-		struct{
-			Count int `json:"count"`
-		}{
-			Count:count,
+	bytes, _ := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"count": count,
 		},
 	})
 	writer.Write(bytes)
 }
 
+// /@cache/tag/:tag/delete
 // 删除某个标签对应的缓存
 func (manager *AdminManager)handleCacheDeleteTag(writer http.ResponseWriter, tag string) {
 	count := cacheManager.DeleteTag(tag)
 
-	bytes, _ := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{
-			Count int `json:"count"`
-		} `json:"data"`
-	} {
-		200,
-		"Success",
-		struct{
-			Count int `json:"count"`
-		}{
-			Count:count,
+	bytes, _ := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"count": count,
 		},
 	})
 	writer.Write(bytes)
 }
 
-// 删除某个标签信息
+// /@cache/tag/:tag
+// 打印某个标签信息
 func (manager *AdminManager)handleCacheTagInfo(writer http.ResponseWriter, tag string) {
 	count, keys, ok := cacheManager.StatTag(tag)
 	if !ok {
-		bytes, _ := json.Marshal(struct {
-			Code int `json:"code"`
-			Message string `json:"message"`
-			Data struct{
-				Count int `json:"count"`
-				Keys []string `json:"keys"`
-			} `json:"data"`
-		} {
-			404,
-			"Not found",
-			struct{
-				Count int `json:"count"`
-				Keys []string `json:"keys"`
-			}{
-				Count:count,
-				Keys:keys,
+		bytes, _ := json.Marshal(Map {
+			"code": 404,
+			"message": "Not found",
+			"data": Map {
+				"count": count,
+				"keys": keys,
 			},
 		})
 
 		writer.Write(bytes)
 	} else {
-		bytes, _ := json.Marshal(struct {
-			Code int `json:"code"`
-			Message string `json:"message"`
-			Data struct{
-				Count int `json:"count"`
-				Keys []string `json:"keys"`
-			} `json:"data"`
-		} {
-			200,
-			"Success",
-			struct{
-				Count int `json:"count"`
-				Keys []string `json:"keys"`
-			}{
-				Count:count,
-				Keys:keys,
+		bytes, _ := json.Marshal(Map {
+			"code": 200,
+			"message": "Success",
+			"data": Map {
+				"count": count,
+				"keys": keys,
 			},
 		})
 
@@ -511,6 +421,7 @@ func (manager *AdminManager)handleCacheTagInfo(writer http.ResponseWriter, tag s
 	}
 }
 
+// /@git/pull
 // 处理Git Pull命令
 func (manager *AdminManager)handleGitPull(writer http.ResponseWriter) {
 	cmd := exec.Command("sh", "-c", "cd " + appManager.AppDir + ";git pull;touch /tmp/tmp-go-file")
@@ -544,14 +455,10 @@ func (manager *AdminManager)handleGitPull(writer http.ResponseWriter) {
 	//刷新数据
 	go appManager.reload()
 
-	_bytes, err := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{} `json:"data"`
-	}{
-		Code: 200,
-		Message: output,
-		Data: struct{}{},
+	_bytes, err := json.Marshal(Map {
+		"code": 200,
+		"message": output,
+		"data": nil,
 	})
 	if err != nil {
 		log.Println(err.Error())
@@ -568,11 +475,18 @@ func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request 
 	if adminConfig.Allow.Clients != nil && len(adminConfig.Allow.Clients) > 0 {
 		if !containsString(adminConfig.Allow.Clients, ip) {
 			if ip != "[::1]" {
-				fmt.Fprint(writer, `{
-					"code": "401",
+				_bytes, err := json.Marshal(Map {
+					"code": 401,
 					"message": "Forbidden",
-					"data": null
-				}`)
+					"data": nil,
+				})
+
+				if err != nil {
+					manager.writeErrorMessage(writer, err)
+				} else {
+					writer.Write(_bytes)
+				}
+
 				return false
 			}
 		}
@@ -580,15 +494,12 @@ func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request 
 	return true
 }
 
+// 写入错误信息
 func (manager *AdminManager)writeErrorMessage(writer http.ResponseWriter, err error) {
-	_bytes, err := json.Marshal(struct {
-		Code int `json:"code"`
-		Message string `json:"message"`
-		Data struct{} `json:"data"`
-	}{
-		Code: 500,
-		Message: err.Error(),
-		Data: struct{}{},
+	_bytes, err := json.Marshal(Map {
+		"code": 500,
+		"message": err.Error(),
+		"data": nil,
 	})
 	if err != nil {
 		log.Println(err.Error())
