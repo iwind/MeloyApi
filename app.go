@@ -11,10 +11,10 @@ import (
 	"log"
 	"fmt"
 	"strconv"
-	"bytes"
 	"os"
 	"syscall"
 	"os/signal"
+	"net/url"
 )
 
 const MELOY_API_VERSION = "1.0"
@@ -65,6 +65,7 @@ var appManager AppManager
 var requestClient = &http.Client{}
 var apiHandlers ApiHandlers = ApiHandlers{}
 var serverMux = http.NewServeMux()
+var serverMuxLoaded = false
 
 // 加载应用
 func Start(appDir string) {
@@ -84,7 +85,7 @@ func Start(appDir string) {
 	}
 
 	//写入PID
-	err := ioutil.WriteFile(appDir + "/data/pid", bytes.NewBufferString(strconv.Itoa(os.Getpid())).Bytes(), 0644)
+	err := ioutil.WriteFile(appDir + "/data/pid", []byte(strconv.Itoa(os.Getpid())), 0644)
 	if err != nil {
 		log.Fatal(err)
 		return
@@ -157,6 +158,11 @@ func Start(appDir string) {
 
 	//等待请求
 	appManager.Wait()
+}
+
+// 取得钩子管理器
+func GetHookManager() (*HookManager)  {
+	return &hookManager
 }
 
 // 判断是否为命令
@@ -310,8 +316,47 @@ func (manager *AppManager) reload() {
 		handler.Enabled = false
 	}
 
+	//处理pattern
+	if !serverMuxLoaded {
+		serverMuxLoaded = true
+
+		serverMux.HandleFunc("/", func (writer http.ResponseWriter, request *http.Request) {
+			// @TODO 需要更好的性能
+			for _, api := range ApiArray {
+				if !api.Enabled {
+					continue
+				}
+				if len(api.patternNames) > 0 && api.patternRegexp.MatchString(request.URL.Path) {
+					matches := api.patternRegexp.FindStringSubmatch(request.URL.Path)
+
+					values := url.Values{}
+					for index, name := range api.patternNames {
+						values.Add(name, matches[index + 1])
+					}
+
+					if len(request.URL.RawQuery) == 0 {
+						request.URL.RawQuery = values.Encode()
+					} else {
+						request.URL.RawQuery += "&" + values.Encode()
+					}
+
+					request.URL.Path = api.Path
+					break
+				}
+			}
+			request.RequestURI = request.URL.Path + "?" + request.URL.Query().Encode()
+			apiHandlers.ServeHTTP(writer, request)
+		})
+	}
+
+
+	//处理路径
 	for _, api := range ApiArray {
-		log.Println("load api '" + api.Path + "' from '" + api.File + "'")
+		log.Println("load api '" + api.Path + "' from '" + strings.TrimPrefix(api.File, manager.AppDir + string(os.PathSeparator) + "apis" + string(os.PathSeparator)) + "'")
+
+		if !api.Enabled {
+			continue
+		}
 
 		func (api Api) {
 			handler, ok := apiHandlers[api.Path]
@@ -398,13 +443,15 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 			continue
 		}
 
-		var api Api
+		var api = Api {
+			Enabled: true,
+		}
 		jsonError := json.Unmarshal(_bytes, &api)
 		if jsonError != nil {
 			log.Printf("Error:%s:%s\n", file.Name(), jsonError)
 			continue
 		}
-		api.File = file.Name()
+		api.File = apiDir + string(os.PathSeparator) + file.Name()
 		api.Parse()
 
 		//转换地址
@@ -495,20 +542,20 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 
 	address := api.Addresses[index]
 
-	hookManager.beforeHook(writer, request, api, func () {
+	hookManager.beforeHook(writer, request, api, func (hookContext *HookContext) {
 		if api.IsAsynchronous {
 			manager.setApiHeaders(writer, api)
 			writer.Write([]byte(api.responseString))
-			go manager.handleMethod(writer, request, api, address, method)
+			go manager.handleMethod(writer, request, api, address, method, hookContext)
 		} else {
 			//开始处理
-			manager.handleMethod(writer, request, api, address, method)
+			manager.handleMethod(writer, request, api, address, method, hookContext)
 		}
 	})
 }
 
 // 转发某个方法的请求
-func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *http.Request, api *Api, address ApiAddress, method string) {
+func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *http.Request, api *Api, address ApiAddress, method string, hookContext *HookContext) {
 	t := time.Now().UnixNano()
 
 	query := request.URL.RawQuery
@@ -532,17 +579,17 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	}
 
 
-	url := address.URL
+	requestURL := address.URL
 	if len(query) > 0 {
-		url += "?" + query
+		requestURL += "?" + query
 	}
 
-	newRequest, err := http.NewRequest(method, url, nil)
+	newRequest, err := http.NewRequest(method, requestURL, nil)
 
 	if err != nil {
 		manager.setApiHeaders(writer, api)
 
-		hookManager.afterHook(writer, request, nil, api, err)
+		hookManager.afterHook(hookContext, nil, err)
 		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
@@ -564,7 +611,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		manager.setApiHeaders(writer, api)
 
 		log.Println("Error:" + err.Error())
-		hookManager.afterHook(writer, request, nil, api, err)
+		hookManager.afterHook(hookContext, nil, err)
 
 		//统计
 		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
@@ -572,7 +619,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	}
 
 	//调用钩子
-	hookManager.afterHook(writer, request, resp, api, nil)
+	hookManager.afterHook(hookContext, resp, nil)
 
 	//分析头部指令等信息
 	apiConfig := ApiConfig{
@@ -765,4 +812,3 @@ func (manager *AppManager) setApiHeaders(writer http.ResponseWriter, api *Api) {
 		writer.Header().Set(header.Name, header.Value)
 	}
 }
-

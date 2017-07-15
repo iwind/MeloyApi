@@ -11,6 +11,9 @@ import (
 	"os/exec"
 	"bufio"
 	"io"
+	"os"
+	"time"
+	"runtime"
 )
 
 type AdminManager struct {
@@ -67,6 +70,8 @@ func (manager *AdminManager)Reload() {
 
 // 处理请求
 func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *http.Request)  {
+	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+
 	if !manager.validateRequest(writer, request) {
 		return
 	}
@@ -96,6 +101,36 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 		matches := reg.FindStringSubmatch(path)
 		if len(matches) > 0 {
 			manager.handleApi(writer, request, matches[1])
+			return
+		}
+	}
+
+	// 删除API
+	{
+		reg, _ := regexp.Compile("^/@api/\\[(.+)]/delete$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			manager.handleApiDelete(writer, request, matches[1])
+			return
+		}
+	}
+
+	// 更改API
+	{
+		reg, _ := regexp.Compile("^/@api/\\[(.+)]/update$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			manager.handleApiUpdate(writer, request, matches[1])
+			return
+		}
+	}
+
+	// 更改API文件名称
+	{
+		reg, _ := regexp.Compile("^/@api/\\[(.+)]/rename/(.+)$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			manager.handleApiRename(writer, request, matches[1], matches[2])
 			return
 		}
 	}
@@ -179,6 +214,11 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 		return
 	}
 
+	if path == "/@monitor" {
+		manager.handleMonitor(writer)
+		return
+	}
+
 	{
 		fmt.Fprint(writer, "404 page not found (" + path + ")")
 	}
@@ -197,7 +237,7 @@ func (manager *AdminManager)handleIndex(writer http.ResponseWriter) {
 	writer.Write(bytes)
 }
 
-// /@api
+// /@mock/:path
 // 输出模拟数据
 func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
@@ -209,7 +249,7 @@ func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Reque
 
 		fmt.Fprint(writer, mock)
 	} else {
-		writer.Write([]byte("404 page not found"))
+		writer.Write([]byte("404 page not found (" + path + ")"))
 	}
 }
 
@@ -267,6 +307,95 @@ func (manager *AdminManager)handleApiDay(writer http.ResponseWriter, _ *http.Req
 	writer.Write(bytes)
 }
 
+// /@api/[:path]/delete
+// 删除API
+func (manager *AdminManager)handleApiDelete(writer http.ResponseWriter, _ *http.Request, path string) {
+	api, ok := adminApiMapping[path]
+	if !ok {
+		_bytes, _ := json.Marshal(Map {
+			"code": 404,
+			"message": "Not found",
+			"data": nil,
+		})
+		writer.Write(_bytes)
+	} else {
+		now := time.Now()
+		timeString := fmt.Sprintf("%d%02d%02d_%02d%02d%02d", now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), now.Second())
+		newFile := api.File + "." + timeString + ".deleted"
+		os.Rename(api.File, newFile)
+		appManager.reload()
+
+		_bytes, _ := json.Marshal(Map {
+			"code": 200,
+			"message": "Success",
+			"data": newFile,
+		})
+		writer.Write(_bytes)
+	}
+}
+
+// /@api/[:path]/update
+// 更改API信息
+func (manager *AdminManager)handleApiUpdate(writer http.ResponseWriter, request *http.Request, path string) {
+	api, ok := adminApiMapping[path]
+	if !ok {
+		_bytes, _ := json.Marshal(Map {
+			"code": 404,
+			"message": "Not found",
+			"data": nil,
+		})
+		writer.Write(_bytes)
+	} else {
+		newBytes, err := ioutil.ReadAll(request.Body)
+		if err != nil {
+			_bytes, _ := json.Marshal(Map {
+				"code": 500,
+				"message": err.Error(),
+				"data": nil,
+			})
+			writer.Write(_bytes)
+			return
+		}
+		log.Println(api.Path, string(newBytes))
+
+		ioutil.WriteFile(api.File, newBytes, 0777)
+
+		appManager.reload()
+
+		_bytes, _ := json.Marshal(Map {
+			"code": 200,
+			"message": "Success",
+			"data": nil,
+		})
+		writer.Write(_bytes)
+	}
+}
+
+// /@api/[:path]/rename
+// 更改API文件名称
+func (manager *AdminManager)handleApiRename(writer http.ResponseWriter, _ *http.Request, path string, toFile string) {
+	api, ok := adminApiMapping[path]
+	if !ok {
+		_bytes, _ := json.Marshal(Map {
+			"code": 404,
+			"message": "Not found",
+			"data": nil,
+		})
+		writer.Write(_bytes)
+	} else {
+		newFile := appManager.AppDir + string(os.PathSeparator) + "apis" + string(os.PathSeparator) + toFile
+		os.Rename(api.File, newFile)
+		appManager.reload()
+
+		_bytes, _ := json.Marshal(Map {
+			"code": 200,
+			"message": "Success",
+			"data": newFile,
+		})
+		writer.Write(_bytes)
+	}
+}
+
 // /@api/[:path]/debug/logs
 // 打印调试日志
 func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, _ *http.Request, path string) {
@@ -287,6 +416,8 @@ func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, _ *http.
 	writer.Write(bytes)
 }
 
+// /@api/[:path]/debug/flush
+// 刷新调试日志
 func (manager *AdminManager)handleDebugFlush(writer http.ResponseWriter, _ *http.Request, _ string) {
 	err, count := statManager.FlushDebugLogs()
 	if err != nil {
@@ -465,6 +596,61 @@ func (manager *AdminManager)handleGitPull(writer http.ResponseWriter) {
 	} else {
 		writer.Write(_bytes)
 	}
+}
+
+// /@monitor
+// 监控信息
+func (manager *AdminManager)handleMonitor(writer http.ResponseWriter) {
+	//内存信息
+	memoryStat := runtime.MemStats{}
+	runtime.ReadMemStats(&memoryStat)
+
+	//负载信息
+	load1 := "0"
+	load2 := "0"
+	load3 := "0"
+	func () {
+		cmd := exec.Command("uptime")
+		stdout, stdoutErr := cmd.StdoutPipe()
+		if stdoutErr != nil {
+			return
+		}
+
+		runErr := cmd.Start()
+		if runErr != nil {
+			return
+		}
+
+		bytes, err := ioutil.ReadAll(stdout)
+		if err != nil {
+			return
+		}
+
+		resultString := string(bytes)
+		reg, _ := regexp.Compile("load averages:\\s*(\\S+)\\s*(\\S+)\\s*(\\S+)")
+		matches := reg.FindStringSubmatch(resultString)
+		if len(matches) > 0 {
+			load1Float, _ := strconv.ParseFloat(matches[1], 32)
+			load2Float, _ := strconv.ParseFloat(matches[2], 32)
+			load3Float, _ := strconv.ParseFloat(matches[3], 32)
+			load1 = fmt.Sprintf("%.2f", load1Float)
+			load2 = fmt.Sprintf("%.2f", load2Float)
+			load3 = fmt.Sprintf("%.2f", load3Float)
+		}
+	}()
+
+	resultBytes, _ := json.Marshal(Map {
+		"code": 200,
+		"message": "Success",
+		"data": Map {
+			"memory": memoryStat.Sys,
+			"routines": runtime.NumGoroutine(),
+			"load1m": load1,
+			"load5m": load2,
+			"load15m": load3,
+		},
+	})
+	writer.Write(resultBytes)
 }
 
 // 校验请求

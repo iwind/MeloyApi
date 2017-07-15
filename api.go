@@ -7,10 +7,14 @@ import (
 	"encoding/json"
 	"encoding/base64"
 	"strings"
+	"reflect"
 )
 
 // API定义
 type Api struct {
+	Enabled bool `json:"enabled"`
+
+	Pattern string `json:"pattern"`
 	Path string `json:"path"`
 	Address string `json:"address"`
 	Methods []string `json:"methods"`
@@ -49,6 +53,9 @@ type Api struct {
 	Stat ApiStat `json:"stat"`
 
 	// 分析后的数据
+	patternRegexp regexp.Regexp
+	patternNames []string
+
 	responseString string
 	hasResponseString bool
 	timeoutDuration time.Duration
@@ -56,6 +63,39 @@ type Api struct {
 
 // 分析API
 func (api *Api) Parse() {
+	//支持pattern，比如:name，:age，:subject(^[\\w-]+$)
+	if len(api.Pattern) > 0 {
+		if len(api.Path) == 0 {
+			api.Path = api.Pattern
+		}
+
+		reg, err := regexp.Compile(":(?:(\\w+)(\\s*(\\([^)]+\\))?))")
+		if err != nil {
+			log.Fatal(err)
+			return
+		}
+
+		pattern := api.Pattern
+		matches := reg.FindAllStringSubmatch(pattern, 10)
+		names := []string {}
+		for _, match := range matches {
+			names = append(names, match[1])
+			if len(match[3]) > 0 {
+				pattern = strings.Replace(pattern, match[0], match[3], 10)
+			} else {
+				pattern = strings.Replace(pattern, match[0], "(\\w+)", 10)
+			}
+		}
+
+		reg, err = regexp.Compile(pattern)
+		if err != nil {
+			log.Println("Error:" + err.Error())
+		} else {
+			api.patternRegexp = *reg
+			api.patternNames = names
+		}
+	}
+
 	//校验和转换api.methods
 	for methodIndex, method := range api.Methods {
 		api.Methods[methodIndex] = strings.ToUpper(method)
@@ -106,35 +146,28 @@ func (api *Api) Parse() {
 
 // 拷贝数据到另外一个API
 func (api *Api) copyFrom(from Api) {
-	api.Path = from.Path
-	api.Methods = from.Methods
-	api.Address = from.Address
+	value := reflect.ValueOf(api)
+	value2 := reflect.ValueOf(from)
 
-	api.Headers = from.Headers
-	api.Timeout = from.Timeout
+	fieldType := reflect.TypeOf(*api)
 
-	api.Name = from.Name
-	api.Description = from.Description
-	api.Params = from.Params
-	api.Dones = from.Dones
-	api.Todos = from.Todos
-	api.IsDeprecated = from.IsDeprecated
-	api.Version = from.Version
+	countFields := value.Elem().NumField()
 
-	api.Roles = from.Roles
-	api.Author = from.Author
-	api.Company = from.Company
+	for i := 0; i < countFields; i ++ {
+		fieldValue := value2.Field(i)
+		fieldName := fieldType.Field(i).Name
 
-	api.IsAsynchronous = from.IsAsynchronous
-	api.Response = from.Response
+		if matched, _ := regexp.MatchString("^[a-z]", fieldName); matched {
+			continue
+		}
 
-	api.Addresses = from.Addresses
-	api.File = from.File
-	api.Mock = from.Mock
+		value.Elem().Field(i).Set(fieldValue)
+	}
 
-	api.Stat = from.Stat
+	api.patternRegexp = from.patternRegexp
+	api.patternNames = from.patternNames
 
-	api.timeoutDuration = from.timeoutDuration
-	api.hasResponseString = from.hasResponseString
 	api.responseString = from.responseString
+	api.hasResponseString = from.hasResponseString
+	api.timeoutDuration = from.timeoutDuration
 }

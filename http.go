@@ -14,22 +14,27 @@ type ApiHandler struct {
 	Api *Api
 	Enabled bool
 }
+
 type ApiHandlers map[string] *ApiHandler
 
 // 处理HTTP请求
-func (h ApiHandlers) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (handlers ApiHandlers) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	if handler, ok := h[path]; ok && handler.Enabled {
+	if handler, ok := handlers[path]; ok && handler.Enabled {
 		handler.ServeHTTP(w, r)
 	} else {
-		http.Error(w, "404 page not found", http.StatusNotFound)
+		http.Error(w, "404 page not found (" + path + ")", http.StatusNotFound)
 	}
 }
 
 // 设置处理函数
-func (h ApiHandlers) HandleFunc(mux ApiHasHandleFunc, api *Api, handler http.HandlerFunc) {
+func (handlers ApiHandlers) HandleFunc(mux ApiHasHandleFunc, api *Api, handler http.HandlerFunc) {
 	pattern := api.Path
-	h[pattern] = &ApiHandler{handler, api,true}
-	mux.HandleFunc(pattern, h.ServeHTTP)
+	handlers[pattern] = &ApiHandler{
+		handler,
+		api,
+		true,
+	}
+	mux.HandleFunc(pattern, handlers.ServeHTTP)
 }
 
