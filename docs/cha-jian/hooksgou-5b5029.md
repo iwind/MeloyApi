@@ -1,21 +1,57 @@
-# meloy-api start
+# Hook\(钩子\)
 
-启动API网关：
+可以在应用启动之前加入自己的钩子函数：
 
-```bash
-./meloy-api start
+```go
+hook1 := MeloyApi.Hook{
+    BeforeFunc: func(context *MeloyApi.HookContext, next func()) {
+        next();
+    },
+    AfterFunc: func(context *MeloyApi.HookContext) {
+
+    },
+}
+MeloyApi.GetHookManager().AddHook()
+
+//启用应用
+MeloyApi.Start(appDir)
 ```
 
-启动后如果`data/`、`logs/`目录不存在，会自动创建这些目录。
+其中`BeforeFunc()`在API请求开始之前调用，如果在`BeforeFunc()`中不调用`next()`，则下面的其他钩子函数和API请求将不会被执行；`AfterFunc()`在API请求结束之后调用。
 
-启动后会在`data/pid`文件中写入当前启动的网关的进程PID，以便实现对进程的关闭、重启等。
+可以加入多个钩子函数：
 
-成功启动后，可以在系统中查看此进程：
+```go
+MeloyApi.GetHookManager().AddHook(hook1)
+MeloyApi.GetHookManager().AddHook(hook2)
+MeloyApi.GetHookManager().AddHook(hook3)
+
+//启用应用
+MeloyApi.Start(appDir)
+```
+
+钩子和API的调用顺序是：
 
 ```
-LiuXiangchaos-MacBook-Pro:main root# ps ax|grep meloy-api
-87510 s000  S      0:00.01 (meloy-api)
-87749 s000  S+     0:00.00 grep meloy-api
+hook1 BeforeFunc()
+hook2 BeforeFunc()
+hook3 BeforeFunc()
+API Request
+hook3 AfterFunc()
+hook2 AfterFunc()
+hook1 AfterFunc()
+```
+
+在`MeloyApi.HookContext`中可以读取和操作`http.ResponseWriter(对调用端的响应写入器)`和 `http.Request（API请求对象）`、`http.Response（API响应对象）`:
+
+```go
+type HookContext struct {
+    Writer http.ResponseWriter
+    Request *http.Request
+    Api *Api
+    Response *http.Response
+    Error error
+}
 ```
 
 

@@ -1,4 +1,4 @@
-# 应用
+# API应用
 
 可以在`config/app.json`中修改API应用的相关配置：
 
