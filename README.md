@@ -21,3 +21,6 @@ func main()  {
 
 # 编译好的Server
 可以在 https://github.com/iwind/MeloyApiServer 找到已经编译好的二进制文件和项目目录结构，可以直接clone使用。
+
+# 文档
+[点击这里查看文档](./docs/SUMMARY.md)
