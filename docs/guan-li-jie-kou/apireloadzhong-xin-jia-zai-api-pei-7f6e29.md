@@ -1,4 +1,6 @@
-# /@api/reload - 重新加载API配置
+# /@api/reload
+
+重新加载API配置。
 
 
 

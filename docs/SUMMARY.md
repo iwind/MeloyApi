@@ -1,6 +1,7 @@
 # Summary
 
 * [MeloyAPI介绍](README.md)
+* [安装](an-zhuang.md)
 * [配置](chapter1.md)
   * [App\(API应用\)](chapter1/ying-yong.md)
   * [Server\(API服务器\)](chapter1/serverfu-wu-566829.md)
@@ -13,9 +14,9 @@
   * [pattern\(匹配模式\)](jie-kou-pei-zhi/patternpi-pei-mo-5f0f29.md)
   * [name\(名称\)](jie-kou-pei-zhi/nameming-79f029.md)
   * [description\(描述\)](jie-kou-pei-zhi/descriptionmiao-8ff029.md)
-  * [author\(作者\)](jie-kou-pei-zhi/authorzuo-800529.md)
-  * [company\(公司\)](jie-kou-pei-zhi/companygong-53f829.md)
   * [mock\(模拟数据\)](jie-kou-pei-zhi/mockmo-ni-shu-636e29.md)
+  * [author\(作者\)](jie-kou-pei-zhi/authorzuo-800529.md)
+  * [company\(公司或机构\)](jie-kou-pei-zhi/companygong-si-huo-zu-7ec7295d.md)
   * [isAsynchronous\(是否异步\)](jie-kou-pei-zhi/isasynchronousshi-fou-yi-6b6529.md)
   * [timeout\(超时时间\)](jie-kou-pei-zhi/timeoutchao-shi-shi-95f429.md)
   * [headers\(报头信息\)](jie-kou-pei-zhi/headersbao-tou-xin-606f29.md)

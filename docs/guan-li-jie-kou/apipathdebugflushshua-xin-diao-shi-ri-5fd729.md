@@ -1,4 +1,6 @@
-# /@api/\[:path\]/debug/flush - 刷新调试日志
+# /@api/\[:path\]/debug/flush 
+
+刷新调试日志。
 
 
 

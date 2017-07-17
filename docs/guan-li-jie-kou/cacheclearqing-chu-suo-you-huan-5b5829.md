@@ -1,4 +1,6 @@
-# /@cache/clear - 清除所有缓存
+# /@cache/clear 
+
+清除所有缓存。
 
 
 

@@ -1,4 +1,6 @@
-# /@api/\[:path\]/rename/:toFile - 更改API名称
+# /@api/\[:path\]/rename/:toFile 
+
+更改API名称。
 
 
 

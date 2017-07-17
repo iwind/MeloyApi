@@ -1,4 +1,6 @@
-# /@cache/tag/:tag/delete - 删除标签
+# /@cache/tag/:tag/delete 
+
+删除标签。
 
 
 

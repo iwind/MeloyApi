@@ -1,4 +1,6 @@
-# /@api/\[:path\]/delete - 删除某个API
+# /@api/\[:path\]/delete
+
+删除某个API。
 
 
 

@@ -1,4 +1,6 @@
-# /@cache/tag/:tag - 标签相关信息
+# /@cache/tag/:tag 
+
+标签相关信息。
 
 
 
