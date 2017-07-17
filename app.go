@@ -323,7 +323,7 @@ func (manager *AppManager) reload() {
 		serverMux.HandleFunc("/", func (writer http.ResponseWriter, request *http.Request) {
 			// @TODO 需要更好的性能
 			for _, api := range ApiArray {
-				if !api.Enabled {
+				if !api.IsEnabled {
 					continue
 				}
 				if len(api.patternNames) > 0 && api.patternRegexp.MatchString(request.URL.Path) {
@@ -354,7 +354,7 @@ func (manager *AppManager) reload() {
 	for _, api := range ApiArray {
 		log.Println("load api '" + api.Path + "' from '" + strings.TrimPrefix(api.File, manager.AppDir + string(os.PathSeparator) + "apis" + string(os.PathSeparator)) + "'")
 
-		if !api.Enabled {
+		if !api.IsEnabled {
 			continue
 		}
 
@@ -444,7 +444,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 		}
 
 		var api = Api {
-			Enabled: true,
+			IsEnabled: true,
 		}
 		jsonError := json.Unmarshal(_bytes, &api)
 		if jsonError != nil {

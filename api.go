@@ -12,7 +12,7 @@ import (
 
 // API定义
 type Api struct {
-	Enabled bool `json:"enabled"`
+	IsEnabled bool `json:"isEnabled"`
 
 	Pattern string `json:"pattern"`
 	Path string `json:"path"`
