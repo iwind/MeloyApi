@@ -14,6 +14,7 @@ import (
 	"os"
 	"time"
 	"runtime"
+	"strings"
 )
 
 type AdminManager struct {
@@ -216,6 +217,26 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 
 	if path == "/@monitor" {
 		manager.handleMonitor(writer, request)
+		return
+	}
+
+	if path == "/@api/stat/requests/rank" {
+		manager.handleStatRequestsRank(writer, request)
+		return
+	}
+
+	if path == "/@api/stat/hits/rank" {
+		manager.handleStatHitsRank(writer, request)
+		return
+	}
+
+	if path == "/@api/stat/errors/rank" {
+		manager.handleStatErrorsRank(writer, request)
+		return
+	}
+
+	if path == "/@api/stat/cost/rank" {
+		manager.handleStatCostRank(writer, request)
 		return
 	}
 
@@ -575,7 +596,9 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 		}
 
 		resultString := string(bytes)
-		reg, _ := regexp.Compile("load averages:\\s*(\\S+)\\s*(\\S+)\\s*(\\S+)")
+		resultString = strings.Replace(resultString, ",", " ", -1)
+		resultString = strings.Replace(resultString, ";", " ", -1)
+		reg, _ := regexp.Compile("load average(?:s)?\\s*:\\s*(\\S+)\\s*(\\S+)\\s*(\\S+)")
 		matches := reg.FindStringSubmatch(resultString)
 		if len(matches) > 0 {
 			load1Float, _ := strconv.ParseFloat(matches[1], 32)
@@ -587,6 +610,8 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 		}
 	}()
 
+	stat, _ := statManager.findStat()
+
 	manager.printJSON(writer, request, Map {
 		"code": 200,
 		"message": "Success",
@@ -596,7 +621,73 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 			"load1m": load1,
 			"load5m": load2,
 			"load15m": load3,
+			"requestsPerMin": stat["requests"],
+			"hitsPercent": stat["hits"],
+			"errorsPercent": stat["errors"],
+			"cost": stat["ms"],
 		},
+	})
+}
+
+// /@api/stat/requests/rank
+// 请求数排行
+func (manager *AdminManager) handleStatRequestsRank(writer http.ResponseWriter, request *http.Request) {
+	apis, err := statManager.FindRequestsRank(10)
+	if err != nil {
+		manager.writeErrorMessage(writer, request, err)
+		return
+	}
+	manager.printJSON(writer, request, Map {
+		"code": 200,
+		"message": "Success",
+		"data": apis,
+	})
+}
+
+
+// /@api/stat/hits/rank
+// 缓存命中数排行
+func (manager *AdminManager) handleStatHitsRank(writer http.ResponseWriter, request *http.Request) {
+	apis, err := statManager.FindHitsRank(10)
+	if err != nil {
+		manager.writeErrorMessage(writer, request, err)
+		return
+	}
+	manager.printJSON(writer, request, Map {
+		"code": 200,
+		"message": "Success",
+		"data": apis,
+	})
+}
+
+
+// /@api/stat/errors/rank
+// 错误数排行
+func (manager *AdminManager) handleStatErrorsRank(writer http.ResponseWriter, request *http.Request) {
+	apis, err := statManager.FindErrorsRank(10)
+	if err != nil {
+		manager.writeErrorMessage(writer, request, err)
+		return
+	}
+	manager.printJSON(writer, request, Map {
+		"code": 200,
+		"message": "Success",
+		"data": apis,
+	})
+}
+
+// /@api/stat/cost/rank
+// 错误数排行
+func (manager *AdminManager) handleStatCostRank(writer http.ResponseWriter, request *http.Request) {
+	apis, err := statManager.FindCostRank(10)
+	if err != nil {
+		manager.writeErrorMessage(writer, request, err)
+		return
+	}
+	manager.printJSON(writer, request, Map {
+		"code": 200,
+		"message": "Success",
+		"data": apis,
 	})
 }
 

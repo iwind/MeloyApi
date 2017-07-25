@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"sync"
 	"encoding/json"
+	"strconv"
 )
 
 type StatManager struct {
@@ -396,6 +397,165 @@ func (manager *StatManager) FlushDebugLogs() (err error, count int) {
 	}
 
 	statMu.Unlock()
+	return
+}
+
+// 按请求数排序
+func (manager *StatManager) FindRequestsRank(size int) (apis []Map, err error) {
+	apis = []Map{}
+	stmt, err := manager.db.Prepare("SELECT path,SUM(requests) AS sum FROM stat_" + lastTableDay + " GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+
+	for rows.Next() {
+		var path string
+		var sum int
+
+		rows.Scan(&path, &sum)
+
+		apis = append(apis, Map {
+			"path": path,
+			"count": sum,
+		})
+	}
+
+	return
+}
+
+// 按缓存命中数排序
+func (manager *StatManager) FindHitsRank(size int) (apis []Map, err error) {
+	apis = []Map{}
+	stmt, err := manager.db.Prepare("SELECT path,AVG(hits * 100/requests) AS sum FROM stat_" + lastTableDay + " WHERE hits>0 GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+
+	for rows.Next() {
+		var path string
+		var sum float32
+
+		rows.Scan(&path, &sum)
+
+		apis = append(apis, Map {
+			"path": path,
+			"percent": sum,
+		})
+	}
+
+	return
+}
+
+// 按错误率排序
+func (manager *StatManager) FindErrorsRank(size int) (apis []Map, err error) {
+	apis = []Map{}
+	stmt, err := manager.db.Prepare("SELECT path,AVG(errors * 100/requests) AS sum FROM stat_" + lastTableDay + " WHERE errors>0 GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+
+	for rows.Next() {
+		var path string
+		var sum float32
+
+		rows.Scan(&path, &sum)
+
+		apis = append(apis, Map {
+			"path": path,
+			"percent": sum,
+		})
+	}
+
+	return
+}
+
+// 按照耗时排序
+func (manager *StatManager) FindCostRank(size int) (apis []Map, err error) {
+	apis = []Map{}
+	stmt, err := manager.db.Prepare("SELECT path,AVG(ms) AS sum FROM stat_" + lastTableDay + " GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+	defer stmt.Close()
+
+	rows, err := stmt.Query()
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+
+	for rows.Next() {
+		var path string
+		var sum float32
+
+		rows.Scan(&path, &sum)
+
+		apis = append(apis, Map {
+			"path": path,
+			"ms": int(sum),
+		})
+	}
+
+	return
+}
+
+// 整体请求频率、命中率、错误率
+func (manager *StatManager) findStat()(result Map, err error) {
+	result = Map{
+		"requests": 0,
+		"hits": 0,
+		"errors": 0,
+	}
+	stmt, err := manager.db.Prepare("SELECT AVG(requests) as requests, SUM(hits) * 100/SUM(requests) AS hits, SUM(errors) * 100/SUM(requests) AS errors, AVG(ms) AS ms FROM stat_" + lastTableDay)
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+
+	defer stmt.Close()
+
+	row := stmt.QueryRow()
+	var requests float32
+	var hits float32
+	var errors float32
+	var ms float32
+	err = row.Scan(&requests, &hits, &errors, &ms)
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+
+	result = Map{
+		"requests": int(requests),
+		"hits": hits,
+		"errors": errors,
+		"ms": int(ms),
+	}
 	return
 }
 
