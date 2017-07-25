@@ -220,6 +220,11 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 		return
 	}
 
+	if path == "/@api/stat" {
+		manager.handleStat(writer, request)
+		return
+	}
+
 	if path == "/@api/stat/requests/rank" {
 		manager.handleStatRequestsRank(writer, request)
 		return
@@ -245,6 +250,7 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 	}
 }
 
+// /@api
 // 处理API根目录请求
 func (manager *AdminManager)handleIndex(writer http.ResponseWriter, request *http.Request) {
 	manager.printJSON(writer, request, Map {
@@ -252,6 +258,8 @@ func (manager *AdminManager)handleIndex(writer http.ResponseWriter, request *htt
 		"message": "Success",
 		"data": Map {
 			"version": MELOY_API_VERSION,
+			"goVersion": runtime.Version(),
+			"goRoot": runtime.GOROOT(),
 		},
 	})
 }
@@ -294,8 +302,8 @@ func (manager *AdminManager)handleApi(writer http.ResponseWriter, request *http.
 // /@api/path/year/:year/month/:month/day/:day
 // 日统计
 func (manager *AdminManager)handleApiDay(writer http.ResponseWriter, request *http.Request, path string, year int, month int, day int) {
-	apiStat := statManager.FindAvgStatForDay(path, year, month, day)
-	minutes := statManager.FindMinuteStatForDay(path, year, month, day)
+	apiStat := statManager.findAvgStatForDay(path, year, month, day)
+	minutes := statManager.findMinuteStatForDay(path, year, month, day)
 
 	manager.printJSON(writer, request, Map {
 		"code": 200,
@@ -395,7 +403,7 @@ func (manager *AdminManager)handleApiRename(writer http.ResponseWriter, request 
 // /@api/[:path]/debug/logs
 // 打印调试日志
 func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, request *http.Request, path string) {
-	logs := statManager.FindDebugLogsForPath(path)
+	logs := statManager.findDebugLogsForPath(path)
 	manager.printJSON(writer, request, Map {
 		"code": 200,
 		"message": "Success",
@@ -409,7 +417,7 @@ func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, request 
 // /@api/[:path]/debug/flush
 // 刷新调试日志
 func (manager *AdminManager)handleDebugFlush(writer http.ResponseWriter, request *http.Request, _ string) {
-	err, count := statManager.FlushDebugLogs()
+	err, count := statManager.flushDebugLogs()
 	if err != nil {
 		manager.printJSON(writer, request, Map {
 			"code": 500,
@@ -436,7 +444,7 @@ func (manager *AdminManager)handleApis(writer http.ResponseWriter, request *http
 	//统计相关
 	var arr = ApiArray
 	for index, api := range arr {
-		api.Stat = statManager.AvgStat(api.Path)
+		api.Stat = statManager.avgStat(api.Path)
 		arr[index] = api
 	}
 
@@ -629,10 +637,20 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 	})
 }
 
+// /@api/stat
+// 总体统计
+func (manager *AdminManager) handleStat(writer http.ResponseWriter, request *http.Request) {
+	manager.printJSON(writer, request, Map {
+		"code": 200,
+		"message": "Success",
+		"data": statManager.findGlobalStat(),
+	})
+}
+
 // /@api/stat/requests/rank
 // 请求数排行
 func (manager *AdminManager) handleStatRequestsRank(writer http.ResponseWriter, request *http.Request) {
-	apis, err := statManager.FindRequestsRank(10)
+	apis, err := statManager.findRequestsRank(10)
 	if err != nil {
 		manager.writeErrorMessage(writer, request, err)
 		return
@@ -648,7 +666,7 @@ func (manager *AdminManager) handleStatRequestsRank(writer http.ResponseWriter, 
 // /@api/stat/hits/rank
 // 缓存命中数排行
 func (manager *AdminManager) handleStatHitsRank(writer http.ResponseWriter, request *http.Request) {
-	apis, err := statManager.FindHitsRank(10)
+	apis, err := statManager.findHitsRank(10)
 	if err != nil {
 		manager.writeErrorMessage(writer, request, err)
 		return
@@ -664,7 +682,7 @@ func (manager *AdminManager) handleStatHitsRank(writer http.ResponseWriter, requ
 // /@api/stat/errors/rank
 // 错误数排行
 func (manager *AdminManager) handleStatErrorsRank(writer http.ResponseWriter, request *http.Request) {
-	apis, err := statManager.FindErrorsRank(10)
+	apis, err := statManager.findErrorsRank(10)
 	if err != nil {
 		manager.writeErrorMessage(writer, request, err)
 		return
@@ -679,7 +697,7 @@ func (manager *AdminManager) handleStatErrorsRank(writer http.ResponseWriter, re
 // /@api/stat/cost/rank
 // 错误数排行
 func (manager *AdminManager) handleStatCostRank(writer http.ResponseWriter, request *http.Request) {
-	apis, err := statManager.FindCostRank(10)
+	apis, err := statManager.findCostRank(10)
 	if err != nil {
 		manager.writeErrorMessage(writer, request, err)
 		return

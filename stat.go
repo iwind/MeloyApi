@@ -81,7 +81,7 @@ func (manager *StatManager) Init(appDir string) {
 			<- tick
 
 			if manager.PrepareDailyTable() {
-				manager.Dump()
+				manager.dump()
 			}
 		}
 	}()
@@ -130,6 +130,14 @@ func (manager *StatManager) PrepareDailyTable() bool {
 	);
 	CREATE INDEX IF NOT EXISTS path_index ON debug_logs_%{date} (path);
 
+
+	CREATE TABLE IF NOT EXISTS stat_global (
+		id integer not null primary key autoincrement,
+		requests integer,
+		hits integer,
+		errors integer,
+		created_at integer
+	);
 	`
 
 	sqlStmt = strings.Replace(sqlStmt, "%{date}", date, -1)
@@ -148,7 +156,7 @@ func (manager *StatManager) PrepareDailyTable() bool {
 }
 
 // 发送统计信息
-func (manager *StatManager) Send(address ApiAddress, path string, uri string, timeMs int64, errors int64, hits int64) {
+func (manager *StatManager) send(address ApiAddress, path string, uri string, timeMs int64, errors int64, hits int64) {
 	key := address.Server + "$$" + address.Host + "$$" + path
 	value, ok := manager.Data[key]
 	if !ok {
@@ -187,7 +195,7 @@ func (manager *StatManager) Send(address ApiAddress, path string, uri string, ti
 }
 
 // 发送调试信息
-func (manager *StatManager) SendDebug(address ApiAddress, path string, uri string, _log string) {
+func (manager *StatManager) sendDebug(address ApiAddress, path string, uri string, _log string) {
 	manager.DebugLogs = append(manager.DebugLogs, DebugLog{
 		address.Server,
 		address.Host,
@@ -213,7 +221,7 @@ func (manager *StatManager) SendDebug(address ApiAddress, path string, uri strin
 }
 
 // 导出数据到数据库
-func (manager *StatManager) Dump() {
+func (manager *StatManager) dump() {
 	data := manager.Data
 
 	//清空
@@ -228,6 +236,7 @@ func (manager *StatManager) Dump() {
 
 	defer stmt.Close()
 
+	//当日统计
 	now := time.Now()
 	for _, statData := range data {
 		_, err := stmt.Exec(statData.Server, statData.Host, statData.Path, statData.TotalMs / statData.Requests, now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), statData.Requests, statData.Errors, statData.Hits)
@@ -237,18 +246,54 @@ func (manager *StatManager) Dump() {
 		}
 	}
 
+	//总体统计
+	statManager.updateGlobalStat(data)
+
 	//导日志
-	statManager.FlushDebugLogs()
+	statManager.flushDebugLogs()
+}
+
+// 更新全局统计
+func (manager *StatManager) updateGlobalStat(data map[string]StatData) {
+	//总体统计
+	globalStmt, err := manager.db.Prepare("SELECT id FROM stat_global LIMIT 1")
+	if err != nil {
+		log.Println("Error:" + err.Error())
+		return
+	}
+
+	defer globalStmt.Close()
+
+	row := globalStmt.QueryRow()
+	var id int
+	err = row.Scan(&id)
+	if err != nil {
+		manager.db.Exec("INSERT INTO stat_global (requests, hits, errors, created_at) VALUES (?, ?, ?, ?)", 0, 0, 0, time.Now().Unix())
+	}
+
+	requests := 0
+	hits := 0
+	errors := 0
+
+	for _, stat := range data {
+		requests += int(stat.Requests)
+		hits += int(stat.Hits)
+		errors += int(stat.Errors)
+	}
+
+	if requests > 0 || hits > 0 || errors > 0 {
+		manager.db.Exec("UPDATE stat_global SET requests=requests+?,hits=hits+?,errors=errors+?", requests, hits, errors)
+	}
 }
 
 // 取得当天的总统计
-func (manager *StatManager) AvgStat(path string) ApiStat  {
+func (manager *StatManager) avgStat(path string) ApiStat  {
 	now := time.Now()
-	return manager.FindAvgStatForDay(path, now.Year(), int(now.Month()), now.Day())
+	return manager.findAvgStatForDay(path, now.Year(), int(now.Month()), now.Day())
 }
 
 // 取得某一天的总统计
-func (manager *StatManager) FindAvgStatForDay(path string, year int, month int, day int) ApiStat {
+func (manager *StatManager) findAvgStatForDay(path string, year int, month int, day int) ApiStat {
 	date := fmt.Sprintf("%d%02d%02d", year, month, day)
 	stmt, err := manager.db.Prepare("SELECT SUM(ms),SUM(requests),SUM(hits),SUM(errors) FROM stat_" + date + " WHERE path=?")
 	if err != nil {
@@ -279,7 +324,7 @@ func (manager *StatManager) FindAvgStatForDay(path string, year int, month int, 
 }
 
 // 取得某天的分钟统计
-func (manager *StatManager) FindMinuteStatForDay(path string, year int, month int, day int) (stats []ApiMinuteStat) {
+func (manager *StatManager) findMinuteStatForDay(path string, year int, month int, day int) (stats []ApiMinuteStat) {
 	stats = []ApiMinuteStat{}
 
 	date := fmt.Sprintf("%d%02d%02d", year, month, day)
@@ -323,7 +368,7 @@ func (manager *StatManager) FindMinuteStatForDay(path string, year int, month in
 }
 
 // 取得某个接口的调试日志
-func (manager *StatManager) FindDebugLogsForPath(path string) (logs []DebugLog) {
+func (manager *StatManager) findDebugLogsForPath(path string) (logs []DebugLog) {
 	logs = []DebugLog{}
 
 	now := time.Now()
@@ -367,7 +412,7 @@ func (manager *StatManager) FindDebugLogsForPath(path string) (logs []DebugLog) 
 }
 
 // 刷新调试数据
-func (manager *StatManager) FlushDebugLogs() (err error, count int) {
+func (manager *StatManager) flushDebugLogs() (err error, count int) {
 	now := time.Now()
 	date := fmt.Sprintf("%d%02d%02d", now.Year(), int(now.Month()), now.Day())
 
@@ -401,7 +446,7 @@ func (manager *StatManager) FlushDebugLogs() (err error, count int) {
 }
 
 // 按请求数排序
-func (manager *StatManager) FindRequestsRank(size int) (apis []Map, err error) {
+func (manager *StatManager) findRequestsRank(size int) (apis []Map, err error) {
 	apis = []Map{}
 	stmt, err := manager.db.Prepare("SELECT path,SUM(requests) AS sum FROM stat_" + lastTableDay + " GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
 	if err != nil {
@@ -432,7 +477,7 @@ func (manager *StatManager) FindRequestsRank(size int) (apis []Map, err error) {
 }
 
 // 按缓存命中数排序
-func (manager *StatManager) FindHitsRank(size int) (apis []Map, err error) {
+func (manager *StatManager) findHitsRank(size int) (apis []Map, err error) {
 	apis = []Map{}
 	stmt, err := manager.db.Prepare("SELECT path,AVG(hits * 100/requests) AS sum FROM stat_" + lastTableDay + " WHERE hits>0 GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
 	if err != nil {
@@ -463,7 +508,7 @@ func (manager *StatManager) FindHitsRank(size int) (apis []Map, err error) {
 }
 
 // 按错误率排序
-func (manager *StatManager) FindErrorsRank(size int) (apis []Map, err error) {
+func (manager *StatManager) findErrorsRank(size int) (apis []Map, err error) {
 	apis = []Map{}
 	stmt, err := manager.db.Prepare("SELECT path,AVG(errors * 100/requests) AS sum FROM stat_" + lastTableDay + " WHERE errors>0 GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
 	if err != nil {
@@ -494,7 +539,7 @@ func (manager *StatManager) FindErrorsRank(size int) (apis []Map, err error) {
 }
 
 // 按照耗时排序
-func (manager *StatManager) FindCostRank(size int) (apis []Map, err error) {
+func (manager *StatManager) findCostRank(size int) (apis []Map, err error) {
 	apis = []Map{}
 	stmt, err := manager.db.Prepare("SELECT path,AVG(ms) AS sum FROM stat_" + lastTableDay + " GROUP BY path ORDER BY sum DESC LIMIT " + strconv.Itoa(size))
 	if err != nil {
@@ -559,7 +604,40 @@ func (manager *StatManager) findStat()(result Map, err error) {
 	return
 }
 
+// 全部的请求数、命中数、错误数
+func (manager *StatManager) findGlobalStat() (result Map) {
+	result = Map {
+		"requests": 0,
+		"hits": 0,
+		"errors": 0,
+		"dateFrom": "",
+		"apis": 0,
+	}
+	row := manager.db.QueryRow("SELECT requests, hits, errors, created_at FROM stat_global LIMIT 1")
+	var requests int
+	var hits int
+	var errors int
+	var createdAt int
+	err := row.Scan(&requests, &hits, &errors, &createdAt)
+	if err != nil {
+		log.Println(err)
+		requests = 0
+		hits = 0
+		errors = 0
+	} else {
+		dateFrom := time.Unix(int64(createdAt), 0)
+		result["dateFrom"] = fmt.Sprintf("%d-%02d-%02d", dateFrom.Year(), int(dateFrom.Month()), dateFrom.Day())
+	}
+
+	result["requests"] = requests
+	result["hits"] = hits
+	result["errors"] = errors
+	result["apis"] = len(ApiArray)
+
+	return
+}
+
 // 关闭统计管理器
-func (manager *StatManager) Close()  {
+func (manager *StatManager) close()  {
 	manager.db.Close()
 }

@@ -377,7 +377,7 @@ func (manager *AppManager) reload() {
 
 // 等待处理请求
 func (manager *AppManager) Wait()  {
-	defer statManager.Close()
+	defer statManager.close()
 
 	//Hold住进程
 	for {
@@ -573,7 +573,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		manager.setApiHeaders(writer, api)
 		writer.Write(cacheEntry.Bytes)
 
-		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 0, 1)
+		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 0, 1)
 
 		return
 	}
@@ -590,7 +590,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		manager.setApiHeaders(writer, api)
 
 		hookManager.afterHook(hookContext, nil, err)
-		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -614,7 +614,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		hookManager.afterHook(hookContext, nil, err)
 
 		//统计
-		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -639,7 +639,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	defer resp.Body.Close()
 
 	if err != nil {
-		statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -658,7 +658,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		errors ++
 	}
 
-	statManager.Send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, errors, 0)
+	statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, errors, 0)
 }
 
 // 分析响应头部
@@ -697,7 +697,7 @@ func (manager *AppManager) processDirective(request *http.Request, address ApiAd
 	{
 		reg, _ := regexp.Compile("^Debug")
 		if reg.MatchString(directive) {
-			statManager.SendDebug(address, path, request.URL.RequestURI(), value)
+			statManager.sendDebug(address, path, request.URL.RequestURI(), value)
 			return
 		}
 	}
