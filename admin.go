@@ -56,6 +56,8 @@ func (manager *AdminManager)Load(appDir string)  {
 	go func() {
 		serverMux := http.NewServeMux()
 		serverMux.HandleFunc("/", manager.handleRequest)
+		serverMux.Handle("/web/", http.StripPrefix("/web/",
+				http.FileServer(http.Dir(appDir + string(os.PathSeparator) + "web" + string(os.PathSeparator)))))
 
 		http.ListenAndServe(address, serverMux)
 	}()
@@ -78,6 +80,13 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 	}
 
 	path := request.URL.Path
+
+	if path == "/" {
+		writer.Header().Set("Location", "/web/")
+		writer.WriteHeader(301)
+		return
+	}
+
 	if path == "/@api/all" {
 		manager.handleApis(writer, request)
 		return
