@@ -62,7 +62,7 @@ type Api struct {
 }
 
 // 分析API
-func (api *Api) Parse() {
+func (api *Api) parse() {
 	//支持pattern，比如:name，:age，:subject(^[\\w-]+$)
 	if len(api.Pattern) > 0 {
 		if len(api.Path) == 0 {

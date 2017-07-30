@@ -28,7 +28,7 @@ type CacheEntry struct {
 var cacheInitOnce sync.Once
 
 //初始化
-func (manager *CacheManager) Init() {
+func (manager *CacheManager) init() {
 	manager.MaxSize = 1024 * 1024 * 10
 
 	cacheInitOnce.Do(func() {
@@ -42,17 +42,17 @@ func (manager *CacheManager) Init() {
 		for {
 			<- tick
 
-			manager.ClearExpired()
+			manager.clearExpired()
 		}
 	}()
 }
 
 // 清除过期的条目
-func (manager *CacheManager) ClearExpired() {
+func (manager *CacheManager) clearExpired() {
 	//清除过期条目
 	for key, value := range manager.Values {
 		if value.ExpiredAtMs < int64(time.Now().UnixNano() / 1000000) {
-			manager.Delete(key)
+			manager.deleteValue(key)
 		}
 	}
 
@@ -67,7 +67,7 @@ func (manager *CacheManager) ClearExpired() {
 					break
 				}
 
-				manager.Delete(key)
+				manager.deleteValue(key)
 
 				newSize --
 			}
@@ -76,7 +76,7 @@ func (manager *CacheManager) ClearExpired() {
 }
 
 // 清除所有的条目
-func (manager *CacheManager) ClearAll() (count int) {
+func (manager *CacheManager) clearAll() (count int) {
 	manager.Mutex.Lock()
 	defer manager.Mutex.Unlock()
 
@@ -87,7 +87,7 @@ func (manager *CacheManager) ClearAll() (count int) {
 }
 
 // 删除某个标签关联的条目
-func (manager *CacheManager) DeleteTag(tag string) (count int) {
+func (manager *CacheManager) deleteTag(tag string) (count int) {
 	keyMap, ok := manager.Tags[tag]
 	if !ok {
 		return
@@ -110,14 +110,14 @@ func (manager *CacheManager) DeleteTag(tag string) (count int) {
 	manager.Mutex.Unlock()
 
 	for key := range keyMap {
-		manager.Delete(key)
+		manager.deleteValue(key)
 	}
 
 	return
 }
 
 // 设置条目内容
-func (manager *CacheManager) Set(key string, tags []string, _bytes []byte, header http.Header, lifeMs int64) {
+func (manager *CacheManager) set(key string, tags []string, _bytes []byte, header http.Header, lifeMs int64) {
 	nowMs := time.Now().UnixNano() / 1000000
 
 	manager.Mutex.Lock()
@@ -150,7 +150,7 @@ func (manager *CacheManager) Set(key string, tags []string, _bytes []byte, heade
 }
 
 // 取得条目内容
-func (manager *CacheManager) Get(key string) (entry CacheEntry, ok bool) {
+func (manager *CacheManager) get(key string) (entry CacheEntry, ok bool) {
 	if manager.Values == nil {
 		ok = false
 		return
@@ -162,7 +162,7 @@ func (manager *CacheManager) Get(key string) (entry CacheEntry, ok bool) {
 	}
 
 	if entry.ExpiredAtMs < int64(time.Now().UnixNano() / 1000000) {
-		manager.Delete(key)
+		manager.deleteValue(key)
 		ok = false
 		return
 	}
@@ -173,7 +173,7 @@ func (manager *CacheManager) Get(key string) (entry CacheEntry, ok bool) {
 }
 
 // 删除某个key
-func (manager *CacheManager) Delete(key string) {
+func (manager *CacheManager) deleteValue(key string) {
 	manager.Mutex.Lock()
 	defer manager.Mutex.Unlock()
 
@@ -206,7 +206,7 @@ func (manager *CacheManager) Delete(key string) {
 
 // 统计标签信息
 // 只取前1000个标签
-func (manager *CacheManager) StatTag(tag string) (count int, keys []string, ok bool) {
+func (manager *CacheManager) statTag(tag string) (count int, keys []string, ok bool) {
 	keys = []string {}
 
 	if manager.Tags == nil {

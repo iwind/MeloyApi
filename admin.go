@@ -24,11 +24,15 @@ type AdminManager struct {
 type AdminConfig struct {
 	Host string
 	Port int
-	Allow AdminConfigAllow
-}
+	Allow struct {
+		Clients []string
+	}
+	Deny struct {
+		Clients []string
+	}
 
-type AdminConfigAllow struct {
-	Clients []string
+	hasAllow bool
+	hasDeny bool
 }
 
 var adminConfig AdminConfig
@@ -47,6 +51,9 @@ func (manager *AdminManager)Load(appDir string)  {
 		log.Println("Error:" + err.Error())
 		return
 	}
+
+	adminConfig.hasAllow = len(adminConfig.Allow.Clients) > 0
+	adminConfig.hasDeny = len(adminConfig.Deny.Clients) > 0
 
 	address := fmt.Sprintf("%s:%d", adminConfig.Host, adminConfig.Port)
 	log.Println("start " + address)
@@ -252,6 +259,11 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 	if path == "/@api/stat/cost/rank" {
 		manager.handleStatCostRank(writer, request)
 		return
+	}
+
+	if path == "/@api/watch" {
+		manager.handleWatch(writer, request)
+		return 
 	}
 
 	{
@@ -479,7 +491,7 @@ func (manager *AdminManager)handleReloadApis(writer http.ResponseWriter, request
 // /@cache/clear
 // 清除所有缓存
 func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter, request *http.Request) {
-	count := cacheManager.ClearAll()
+	count := cacheManager.clearAll()
 
 	manager.printJSON(writer, request, Map {
 		"code": 200,
@@ -493,7 +505,7 @@ func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter, request
 // /@cache/[:path]/clear
 // 清除某个API对应的所有Cache
 func (manager *AdminManager)handleCacheClearPath(writer http.ResponseWriter, request *http.Request, path string)  {
-	count := cacheManager.DeleteTag("$MeloyAPI$" + path)
+	count := cacheManager.deleteTag("$MeloyAPI$" + path)
 
 	manager.printJSON(writer, request, Map {
 		"code": 200,
@@ -507,7 +519,7 @@ func (manager *AdminManager)handleCacheClearPath(writer http.ResponseWriter, req
 // /@cache/tag/:tag/delete
 // 删除某个标签对应的缓存
 func (manager *AdminManager)handleCacheDeleteTag(writer http.ResponseWriter, request *http.Request, tag string) {
-	count := cacheManager.DeleteTag(tag)
+	count := cacheManager.deleteTag(tag)
 
 	manager.printJSON(writer, request, Map {
 		"code": 200,
@@ -521,7 +533,7 @@ func (manager *AdminManager)handleCacheDeleteTag(writer http.ResponseWriter, req
 // /@cache/tag/:tag
 // 打印某个标签信息
 func (manager *AdminManager)handleCacheTagInfo(writer http.ResponseWriter, request *http.Request, tag string) {
-	count, keys, ok := cacheManager.StatTag(tag)
+	count, keys, ok := cacheManager.statTag(tag)
 	if !ok {
 		manager.printJSON(writer, request, Map {
 			"code": 404,
@@ -718,24 +730,59 @@ func (manager *AdminManager) handleStatCostRank(writer http.ResponseWriter, requ
 	})
 }
 
+// /@api/watch
+// 监控日志
+func (manager *AdminManager)handleWatch(writer http.ResponseWriter, request *http.Request)  {
+	appManager.setWatching(true)
+
+	//读取日志
+	manager.printJSON(writer, request, Map {
+		"code": 200,
+		"message": "Success",
+		"data": statManager.watchLogs(),
+	})
+}
+
 // 校验请求
 func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request *http.Request) bool {
-	//取得IP
-	reg, _ := regexp.Compile(":\\d+$")
-	ip := reg.ReplaceAllString(request.RemoteAddr, "")
-	if adminConfig.Allow.Clients != nil && len(adminConfig.Allow.Clients) > 0 {
-		if !containsString(adminConfig.Allow.Clients, ip) {
-			if ip != "[::1]" {
-				manager.printJSON(writer, request, Map {
-					"code": 401,
-					"message": "Forbidden",
-					"data": nil,
-				})
+	if !adminConfig.hasAllow && !adminConfig.hasDeny {
+		return true
+	}
 
-				return false
-			}
+	reg, _ := ReuseRegexpCompile(":\\d+$")
+	ip := reg.ReplaceAllString(request.RemoteAddr, "")
+
+	//本地的
+	if adminConfig.Host == "0.0.0.0" && ip == "[::1]" {
+		return  true
+	}
+
+	//禁止的
+	if adminConfig.hasDeny {
+		if containsString(adminConfig.Deny.Clients, ip) {
+			manager.printJSON(writer, request, Map {
+				"code": 403,
+				"message": "Forbidden",
+				"data": nil,
+			})
+
+			return false
 		}
 	}
+
+	//支持的
+	if adminConfig.hasAllow {
+		if !containsString(adminConfig.Allow.Clients, ip) {
+			manager.printJSON(writer, request, Map {
+				"code": 403,
+				"message": "Forbidden",
+				"data": nil,
+			})
+
+			return false
+		}
+	}
+
 	return true
 }
 

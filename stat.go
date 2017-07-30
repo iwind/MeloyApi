@@ -10,6 +10,12 @@ import (
 	"sync"
 	"encoding/json"
 	"strconv"
+	"net/http"
+	"net/http/httputil"
+	"io"
+	"bytes"
+	"io/ioutil"
+	"compress/gzip"
 )
 
 type StatManager struct {
@@ -56,11 +62,30 @@ type ApiStat struct {
 	Errors int `json:"errors"`
 }
 
+
+type ApiWatchLog struct {
+	ID int64 `json:"id"`
+	CreatedAt int64 `json:"createdAt"`
+
+	Request struct {
+		URI string `json:"uri"`
+		Method string `json:"method"`
+		Data string `json:"data"`
+	} `json:"request"`
+
+	Response struct {
+		StatusCode int `json:"statusCode"`
+		Status string `json:"status"`
+		Data string `json:"data"`
+	} `json:"response"`
+}
+
 var lastTableDay string = ""
 var statMu sync.Mutex
+var statWatchLogs = []ApiWatchLog {}
 
 // 初始化
-func (manager *StatManager) Init(appDir string) {
+func (manager *StatManager) init(appDir string) {
 	manager.Data = make(map[string] StatData)
 	manager.DebugLogs = []DebugLog{}
 
@@ -72,7 +97,7 @@ func (manager *StatManager) Init(appDir string) {
 	manager.db = db
 
 	// 准备数据库表
-	manager.PrepareDailyTable()
+	manager.prepareDailyTable()
 
 	//启动定时器，每分钟导出数据到本地
 	go func() {
@@ -80,7 +105,7 @@ func (manager *StatManager) Init(appDir string) {
 		for {
 			<- tick
 
-			if manager.PrepareDailyTable() {
+			if manager.prepareDailyTable() {
 				manager.dump()
 			}
 		}
@@ -88,7 +113,7 @@ func (manager *StatManager) Init(appDir string) {
 }
 
 // 准备每天的数据表格
-func (manager *StatManager) PrepareDailyTable() bool {
+func (manager *StatManager) prepareDailyTable() bool {
 	now := time.Now()
 	date := fmt.Sprintf("%d%02d%02d", now.Year(), int(now.Month()), now.Day())
 
@@ -178,7 +203,7 @@ func (manager *StatManager) send(address ApiAddress, path string, uri string, ti
 	manager.Data[key] = value
 
 	if appManager.IsDebug {
-		bytes, err := json.MarshalIndent(Map {
+		_bytes, err := json.MarshalIndent(Map {
 			"Api": path,
 			"Address": address.URL,
 			"URI": uri,
@@ -189,7 +214,7 @@ func (manager *StatManager) send(address ApiAddress, path string, uri string, ti
 		if err != nil {
 			log.Println(err)
 		} else {
-			log.Println(string(bytes))
+			log.Println(string(_bytes))
 		}
 	}
 }
@@ -206,7 +231,7 @@ func (manager *StatManager) sendDebug(address ApiAddress, path string, uri strin
 	})
 
 	if appManager.IsDebug {
-		bytes, err := json.MarshalIndent(Map {
+		_bytes, err := json.MarshalIndent(Map {
 			"Api": path,
 			"Address": address.URL,
 			"URI": uri,
@@ -215,9 +240,68 @@ func (manager *StatManager) sendDebug(address ApiAddress, path string, uri strin
 		if err != nil {
 			log.Println(err)
 		} else {
-			log.Println(string(bytes))
+			log.Println(string(_bytes))
 		}
 	}
+}
+
+// 发送请求
+func (manager *StatManager) sendRequest(response *http.Response, request *http.Request) {
+	t := time.Now()
+	watchLog := ApiWatchLog{
+		ID: t.UnixNano(),
+		CreatedAt: t.Unix(),
+	}
+	watchLog.Request.Method = request.Method
+	watchLog.Request.URI = request.RequestURI
+
+	watchLog.Response.StatusCode = response.StatusCode
+	watchLog.Response.Status = response.Status
+
+	requestBytes, err := httputil.DumpRequest(request, true)
+	if err == nil {
+		watchLog.Request.Data = string(requestBytes)
+	}
+
+	responseBytes, err := httputil.DumpResponse(response, false)
+	if err == nil {
+		watchLog.Response.Data = string(responseBytes)
+	}
+
+	var bodyCopy io.ReadCloser
+	bodyCopy, response.Body, err = manager.drainBody(response.Body)
+
+	var reader io.ReadCloser
+	switch response.Header.Get("Content-Encoding") {
+	case "gzip":
+		reader, err = gzip.NewReader(response.Body)
+		if err == nil {
+			defer reader.Close()
+		}
+	default:
+		reader = response.Body
+	}
+
+	_bytes, _ := ioutil.ReadAll(reader)
+	watchLog.Response.Data +=  string(_bytes)
+	response.Body = bodyCopy
+
+	statWatchLogs = append(statWatchLogs, watchLog)
+}
+
+func (manager *StatManager) drainBody(b io.ReadCloser) (r1, r2 io.ReadCloser, err error) {
+	if b == http.NoBody {
+		// No copying needed. Preserve the magic sentinel meaning of NoBody.
+		return http.NoBody, http.NoBody, nil
+	}
+	var buf bytes.Buffer
+	if _, err = buf.ReadFrom(b); err != nil {
+		return nil, b, err
+	}
+	if err = b.Close(); err != nil {
+		return nil, b, err
+	}
+	return ioutil.NopCloser(&buf), ioutil.NopCloser(bytes.NewReader(buf.Bytes())), nil
 }
 
 // 导出数据到数据库
@@ -637,7 +721,30 @@ func (manager *StatManager) findGlobalStat() (result Map) {
 	return
 }
 
+// 读取监控日志
+func (manager *StatManager) watchLogs() []ApiWatchLog {
+	var logs = []ApiWatchLog {}
+
+	var j = 0
+	var max = 50
+	var count = len(statWatchLogs)
+	for i := count - 1; i >= 0 ; i -- {
+		logs = append(logs, statWatchLogs[i])
+		j ++
+
+		if j >= max {
+			break
+		}
+	}
+
+	if count > max {
+		statWatchLogs = statWatchLogs[(count - max):]
+	}
+
+	return logs
+}
+
 // 关闭统计管理器
-func (manager *StatManager) close()  {
+func (manager *StatManager) closeDb()  {
 	manager.db.Close()
 }

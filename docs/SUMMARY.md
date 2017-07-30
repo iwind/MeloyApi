@@ -2,6 +2,7 @@
 
 * [MeloyAPI介绍](README.md)
 * [安装](an-zhuang.md)
+  * [nginx代理](an-zhuang/nginxdai-li.md)
 * [配置](chapter1.md)
   * [App\(API应用\)](chapter1/ying-yong.md)
   * [Server\(API服务器\)](chapter1/serverfu-wu-566829.md)
@@ -43,6 +44,7 @@
     * [/@api/\[:path\]/year/:year/month/:month/day/:day\(当日按分钟统计\)](guan-li-jie-kou/apipathyearyearmonthmonthdaydaydang-ri-an-fen-zhong-tong-8ba129.md)
     * [/@api/\[:path\]/debug/logs\(获取调试日志\)](guan-li-jie-kou/apipathdebuglogshuo-qu-diao-shi-ri-5fd729.md)
     * [/@api/\[:path\]/debug/flush\(刷新调试日志\)](guan-li-jie-kou/apipathdebugflushshua-xin-diao-shi-ri-5fd729.md)
+    * [/@api/watch](guan-li-jie-kou/apiwatch.md)
   * [缓存](guan-li-jie-kou/huan-cun.md)
     * [/@cache/tag/:tag\(标签相关信息\)](guan-li-jie-kou/cachetagtagbiao-qian-xiang-guan-xin-606f29.md)
     * [/@cache/tag/:tag/delete\(删除标签\)](guan-li-jie-kou/cachetagtagdeleteshan-chu-biao-7b7e29.md)
@@ -56,6 +58,8 @@
     * [/@api/stat/cost/rank\(按照请求耗时排名\)](guan-li-jie-kou/tong-ji/apistatcostrankan-zhao-qing-qiu-hao-shi-pai-540d29.md)
   * [Git](guan-li-jie-kou/git.md)
     * [/@git/pull\(在MeloyAPI安装根目录下执行git pull\)](guan-li-jie-kou/gitpullzai-meloyapi-an-zhuang-gen-mu-lu-xia-zhi-xing-git-pull.md)
+  * 监控
+    * [/@monitor\(取得监控信息\)](guan-li-jie-kou/monitorqu-de-jian-kong-xin-606f29.md)
 * [命令行](ming-ling-xing.md)
   * [meloy-api start](ming-ling-xing/meloy-api-start.md)
   * [meloy-api stop](ming-ling-xing/meloy-api-stop.md)
