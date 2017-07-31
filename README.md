@@ -24,7 +24,7 @@ func main()  {
 
 # 性能
 * CPU x 2/4G内存：2800 requests/s
-* CPU x 4/8G内存：5500 requests/s
+* CPU x 8/8G内存：5500 requests/s
 
 使用的测试脚本：
 ~~~shell
