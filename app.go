@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"os/signal"
 	"net/url"
+	"bytes"
 )
 
 const MELOY_API_VERSION = "1.0"
@@ -33,14 +34,30 @@ type Server struct {
 	Hosts []Host
 }
 
+// APP配置
 type AppConfig struct {
 	Host string
 	Port int
+
 	Allow struct {
 		Clients []string
 	}
+
 	Deny struct {
 		Clients []string
+	}
+
+	Limits struct {
+		Requests struct {
+			Minute int
+			Day int
+		}
+	}
+
+	Users []struct {
+		Type string
+		Username string
+		Password string
 	}
 
 	//是否有限制
@@ -50,6 +67,19 @@ type AppConfig struct {
 	//监听
 	isWatching bool
 	watchingAt int64
+
+	//限流
+	hasMinuteLimit bool
+	hasDayLimit bool
+
+	limitLastMinute string
+	limitLastDay string
+
+	limitMinuteLeft int
+	limitDayLeft int
+
+	//用户限制
+	hasUsers bool
 }
 
 type ApiConfig struct {
@@ -200,6 +230,9 @@ func (manager *AppManager) isCommand() (isCommand bool) {
 		} else if command == "version" || command == "-v" {
 			manager.versionCommand()
 			return
+		} else if command == "create" {
+			manager.createCommand()
+			return 
 		}
 
 		log.Println("unsupported args '" + strings.Join(os.Args[1:], " ") + "'")
@@ -313,6 +346,44 @@ func (manager *AppManager) versionCommand()  {
 	fmt.Println("  E-mail: 19644627@qq.com")
 }
 
+// 创建API
+func (manager *AppManager) createCommand()  {
+	if len(os.Args) <= 2 {
+		fmt.Print("Usage: ./meloy-api create [API Code]\n\n")
+		return
+	}
+
+
+	serverCode := "代号"
+	servers := manager.loadServers()
+	if len(servers) > 0 {
+		serverCode = servers[0].Code
+	}
+
+	code := os.Args[2]
+	apiFile := manager.AppDir + "/apis/" + code + ".json"
+	err := ioutil.WriteFile(apiFile, []byte(`{
+  "path": "/` + strings.Replace(code, "_", "/", -1) + `",
+  "name": "接口名称",
+  "description": "接口描述",
+  "address": "%{server.` + serverCode + `}%{api.path}",
+  "methods": [ "get", "post" ],
+  "params": [
+    {
+      "name": "",
+      "type": "",
+      "description": ""
+    }
+  ]
+}`), 0777)
+	if err != nil {
+		fmt.Println("Error:" + err.Error())
+	} else {
+		os.Chmod(apiFile, 0777)
+		fmt.Println("'apis/" + code + ".json' created")
+	}
+}
+
 // 加载App配置
 func (manager *AppManager) loadAppConfig() {
 	appBytes, appErr := ioutil.ReadFile(manager.AppDir + "/config/app.json")
@@ -327,8 +398,18 @@ func (manager *AppManager) loadAppConfig() {
 		return
 	}
 
+	//用户限制
+	appConfig.hasUsers = len(appConfig.Users) > 0
+
+	//客户端限制
 	appConfig.hasAllow = len(appConfig.Allow.Clients) > 0
 	appConfig.hasDeny = len(appConfig.Deny.Clients) > 0
+
+	//请求限制
+	appConfig.limitDayLeft = appConfig.Limits.Requests.Day
+	appConfig.limitMinuteLeft = appConfig.Limits.Requests.Minute
+	appConfig.hasDayLimit = appConfig.limitDayLeft > 0
+	appConfig.hasMinuteLimit = appConfig.limitMinuteLeft > 0
 }
 
 // 重新加载API配置
@@ -337,7 +418,7 @@ func (manager *AppManager) reload() {
 	manager.loadAppConfig()
 
 	//服务器配置
-	servers := appManager.loadServers(manager.AppDir)
+	servers := appManager.loadServers()
 	ApiArray = []Api{}
 	appManager.loadApis(manager.AppDir + string(os.PathSeparator) + "apis", servers, &ApiArray)
 
@@ -392,10 +473,6 @@ func (manager *AppManager) reload() {
 				handler.Api.copyFrom(api)
 			} else {
 				handlerManager.HandleFunc(serverMux, &api, func(writer http.ResponseWriter, request *http.Request) {
-					if !manager.validateRequest(request) {
-						http.Error(writer, "Permission Denied", http.StatusForbidden)
-						return
-					}
 					appManager.handle(writer, request, &api)
 				})
 			}
@@ -417,8 +494,8 @@ func (manager *AppManager) wait()  {
 }
 
 // 加载服务器列表
-func (manager *AppManager) loadServers(appDir string) (servers []Server) {
-	serverBytes, serverErr := ioutil.ReadFile(appDir + "/config/servers.json")
+func (manager *AppManager) loadServers() (servers []Server) {
+	serverBytes, serverErr := ioutil.ReadFile(manager.AppDir + "/config/servers.json")
 
 	if serverErr != nil {
 		log.Printf("Error:%s\n", serverErr)
@@ -477,7 +554,17 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 		var api = Api {
 			IsEnabled: true,
 		}
-		jsonError := json.Unmarshal(_bytes, &api)
+
+		jsonString := string(_bytes)
+
+		//删除注释
+		commentReg, err := ReuseRegexpCompile("/([*]+((.|\n|\r)+)[*]+/)|(\n\\s+//.+)")
+		if err != nil {
+			continue
+		}
+		jsonString = commentReg.ReplaceAllString(jsonString, "")
+
+		jsonError := json.Unmarshal([]byte(jsonString), &api)
 		if jsonError != nil {
 			log.Printf("Error:%s:%s\n", file.Name(), jsonError)
 			continue
@@ -554,6 +641,24 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 
 // 处理请求
 func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Request, api *Api) {
+	//登录用户
+	if !manager.validateUser(request) {
+		http.Error(writer, "Permission Denied", http.StatusForbidden)
+		return
+	}
+
+	//校验请求
+	if !manager.validateRequest(request) {
+		http.Error(writer, "Permission Denied", http.StatusForbidden)
+		return
+	}
+
+	//处理限流
+	if manager.reachLimit() {
+		http.Error(writer, "API requests limit reached", http.StatusForbidden)
+		return
+	}
+
 	countAddresses := len(api.Addresses)
 
 	if countAddresses == 0 {
@@ -587,7 +692,6 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 
 // 转发某个方法的请求
 func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *http.Request, api *Api, address ApiAddress, method string, hookContext *HookContext) {
-
 	/**remote, err := url.Parse("http://ejj.com/")
 	if err != nil {
 		panic(err)
@@ -633,6 +737,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 
 
 	requestURL := address.URL
+	uri := request.RequestURI
 	if len(query) > 0 {
 		requestURL += "?" + query
 	}
@@ -648,7 +753,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	}
 
 	newRequest.Header = request.Header
-	newRequest.Header.Set("Meloy-Api", "1.0")
+	request.Header.Set("Meloy-Api", "1.0")
 	newRequest.Body = request.Body
 
 	//超时时间
@@ -658,12 +763,30 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		requestClient.Timeout = 30 * time.Second //@TODO 从server配置中读取
 	}
 
-	resp, err := requestClient.Do(newRequest)
-
 	//是否正在watch
-	if appConfig.isWatching && appConfig.watchingAt > time.Now().Unix() - appConfig.watchingAt {
-		statManager.sendRequest(resp, request)
+	var isWatching = false
+	if appConfig.isWatching {
+		if appConfig.watchingAt > time.Now().Unix() - 60 {
+			isWatching = true
+		} else {
+			appConfig.isWatching = false
+		}
 	}
+
+	var requestCopy *http.Request
+	if isWatching {
+		buf,err := ioutil.ReadAll(request.Body)
+		if err == nil {
+			requestBodyCopy := ioutil.NopCloser(bytes.NewBuffer(buf))
+			requestBodyCopy2 := ioutil.NopCloser(bytes.NewBuffer(buf))
+			requestCopy, _ = http.NewRequest(request.Method, request.RequestURI, requestBodyCopy)
+			requestCopy.RequestURI = request.RequestURI
+			requestCopy.Header = request.Header
+			newRequest.Body = requestBodyCopy2
+		}
+	}
+
+	resp, err := requestClient.Do(newRequest)
 
 	if err != nil {
 		manager.setApiHeaders(writer, api)
@@ -674,6 +797,13 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		//统计
 		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
+	}
+
+	//监控日志
+	if isWatching {
+		if requestCopy != nil {
+			statManager.sendRequest(resp, requestCopy)
+		}
 	}
 
 	//调用钩子
@@ -694,7 +824,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		_bytes, err = ioutil.ReadAll(resp.Body)
 	}
 
-	defer resp.Body.Close()
+	resp.Body.Close()
 
 	if err != nil {
 		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
@@ -716,7 +846,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		errors ++
 	}
 
-	statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, errors, 0)
+	statManager.send(address, api.Path, uri, (time.Now().UnixNano() - t) / 1000000, errors, 0)
 }
 
 // 分析响应头部
@@ -865,6 +995,30 @@ func (manager *AppManager)setWatching(isWatching bool)  {
 	appConfig.watchingAt = time.Now().Unix()
 }
 
+// 校验用户
+func (manager *AppManager) validateUser(request *http.Request) bool {
+	if !appConfig.hasUsers {
+		return true
+	}
+
+	username := request.Header.Get("Meloy-Username")
+	password := request.Header.Get("Meloy-Password")
+
+	if len(username) == 0 || len(password) == 0 {
+		return false
+	}
+
+	for _, config := range appConfig.Users {
+		if config.Type == "account" {
+			if config.Username == username && config.Password == password {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
 // 校验请求
 func (manager *AppManager) validateRequest(request *http.Request) bool {
 	if !appConfig.hasAllow && !appConfig.hasDeny {
@@ -894,6 +1048,43 @@ func (manager *AppManager) validateRequest(request *http.Request) bool {
 	}
 
 	return true
+}
+
+// 判断是否达到请求限制
+func (manager *AppManager) reachLimit() bool {
+	if !appConfig.hasMinuteLimit && !appConfig.hasDayLimit {
+		return false
+	}
+
+	now := time.Now()
+
+	if appConfig.hasMinuteLimit {
+		currentMinute := fmt.Sprintf("%04d-%02d-%02d %02d:%02d", now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute())
+		if currentMinute != appConfig.limitLastMinute {
+			appConfig.limitLastMinute = currentMinute
+			appConfig.limitMinuteLeft = appConfig.Limits.Requests.Minute
+		}
+
+		if appConfig.limitMinuteLeft <= 0 {
+			return true
+		}
+		appConfig.limitMinuteLeft --
+	}
+
+	if appConfig.hasDayLimit {
+		currentDay := fmt.Sprintf("%04d-%02d-%02d", now.Year(), int(now.Month()), now.Day())
+		if currentDay != appConfig.limitLastDay {
+			appConfig.limitLastDay = currentDay
+			appConfig.limitDayLeft = appConfig.Limits.Requests.Day
+		}
+
+		if appConfig.limitDayLeft <= 0 {
+			return true
+		}
+		appConfig.limitDayLeft --
+	}
+
+	return false
 }
 
 // 设置API头部信息

@@ -80,7 +80,12 @@ func (manager *AdminManager)Reload() {
 
 // 处理请求
 func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *http.Request)  {
-	writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	request.ParseForm()
+	if request.Form.Get("_editor") == "true" {
+		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+	} else {
+		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+	}
 
 	if !manager.validateRequest(writer, request) {
 		return
@@ -799,6 +804,8 @@ func (manager *AdminManager)writeErrorMessage(writer http.ResponseWriter, reques
 func (manager *AdminManager)printJSON(writer http.ResponseWriter, request *http.Request, data Map) {
 	request.ParseForm()
 	pretty := request.Form.Get("_pretty")
+	editor := request.Form.Get("_editor")
+
 	var bytes []byte
 	var err error
 	if pretty == "true" {
@@ -811,6 +818,48 @@ func (manager *AdminManager)printJSON(writer http.ResponseWriter, request *http.
 	if err != nil {
 		writer.Write([]byte("Error:" + err.Error()))
 	} else {
+		if editor == "true" {
+			writer.Write([]byte(`<!DOCTYPE html>
+<html>
+<head>
+<style type="text/css">
+div {
+	position: absolute;
+	top: 1em;
+	bottom: 1em;
+	right: 1em;
+	left: 1em;
+	margin: 0;
+}
+
+div textarea {
+	border: 1px solid rgba(34,36,38,.15);
+	transition: color .1s ease,border-color .1s ease;
+	box-shadow: 0 0 0 0 transparent inset;
+	font-size: 14px;
+	line-height: 1.5;
+	outline: 0;
+	position: absolute;
+	width: 100%;
+	top: 0;
+	bottom: 0;
+	right: 0;
+	left: 0;
+	margin: 0;
+	font-family: Lato,'Helvetica Neue',Arial,Helvetica,sans-serif;
+}
+</style>
+</head>
+<body>
+<div><textarea>`))
+		}
 		writer.Write(bytes)
+
+		if editor == "true" {
+			writer.Write([]byte(`</textarea></div>
+</body>
+</html>
+			`))
+		}
 	}
 }

@@ -86,7 +86,7 @@ var statWatchLogs = []ApiWatchLog {}
 
 // 初始化
 func (manager *StatManager) init(appDir string) {
-	manager.Data = make(map[string] StatData)
+	manager.Data = map[string] StatData {}
 	manager.DebugLogs = []DebugLog{}
 
 	//启动数据库
@@ -182,6 +182,8 @@ func (manager *StatManager) prepareDailyTable() bool {
 
 // 发送统计信息
 func (manager *StatManager) send(address ApiAddress, path string, uri string, timeMs int64, errors int64, hits int64) {
+	statMu.Lock()
+
 	key := address.Server + "$$" + address.Host + "$$" + path
 	value, ok := manager.Data[key]
 	if !ok {
@@ -200,7 +202,10 @@ func (manager *StatManager) send(address ApiAddress, path string, uri string, ti
 		value.Errors += errors
 		value.Hits += hits
 	}
+
+
 	manager.Data[key] = value
+	statMu.Unlock()
 
 	if appManager.IsDebug {
 		_bytes, err := json.MarshalIndent(Map {
