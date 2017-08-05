@@ -15,6 +15,7 @@ import (
 	"os/signal"
 	"net/url"
 	"bytes"
+	"sync"
 )
 
 const MELOY_API_VERSION = "1.0"
@@ -106,7 +107,11 @@ var statManager StatManager
 var cacheManager CacheManager
 var hookManager HookManager
 var appManager AppManager
-var requestClient = &http.Client{}
+var requestClient = &http.Client{
+	Transport: &http.Transport{
+		MaxIdleConnsPerHost: 256,
+	},
+}
 var handlerManager HandlerManager = HandlerManager{}
 var serverMux = http.NewServeMux()
 var serverMuxLoaded = false
@@ -235,6 +240,7 @@ func (manager *AppManager) isCommand() (isCommand bool) {
 			return 
 		}
 
+		isCommand = false
 		log.Println("unsupported args '" + strings.Join(os.Args[1:], " ") + "'")
 		return
 	}
@@ -488,9 +494,9 @@ func (manager *AppManager) wait()  {
 	defer statManager.closeDb()
 
 	//Hold住进程
-	for {
-		time.Sleep(1 * time.Hour)
-	}
+	var wg = sync.WaitGroup{}
+	wg.Add(1)
+	wg.Wait()
 }
 
 // 加载服务器列表
@@ -633,6 +639,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 			}
 		}
 
+		api.countAddresses = len(api.Addresses)
 		*apis = append(*apis, api)
 	}
 
@@ -659,15 +666,21 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	countAddresses := len(api.Addresses)
-
-	if countAddresses == 0 {
+	if api.countAddresses == 0 {
 		fmt.Fprintln(writer, "Does not have avaiable address")
 		return
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	index := rand.Int() % countAddresses
+	//选取地址
+	var address ApiAddress
+	if api.countAddresses > 1 {
+		rand.Seed(time.Now().UnixNano())
+		index := rand.Int() % api.countAddresses
+		address = api.Addresses[index]
+	} else {
+		address = api.Addresses[0]
+	}
+
 
 	//检查method
 	method := strings.ToUpper(request.Method)
@@ -675,8 +688,6 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 		fmt.Fprintln(writer, "'" + request.Method + "' method is not supported")
 		return
 	}
-
-	address := api.Addresses[index]
 
 	hookManager.beforeHook(writer, request, api, func (hookContext *HookContext) {
 		if api.IsAsynchronous {
@@ -692,27 +703,6 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 
 // 转发某个方法的请求
 func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *http.Request, api *Api, address ApiAddress, method string, hookContext *HookContext) {
-	/**remote, err := url.Parse("http://ejj.com/")
-	if err != nil {
-		panic(err)
-	}
-
-	ms := time.Now().Nanosecond()
-	proxy := httputil.NewSingleHostReverseProxy(remote)
-	proxy.ModifyResponse = func(response *http.Response) error {
-		log.Println("modify response", float64(time.Now().Nanosecond() - ms)/ 1000000)
-		return nil
-	}
-	request.Host = "ejj.com"
-	proxy.ServeHTTP(writer, request)
-	log.Println("end", float64(time.Now().Nanosecond() - ms)/ 1000000)
-
-	//终止程序
-	if time.Now().Unix() > 10800 {
-		return
-	}
-	**/
-
 	t := time.Now().UnixNano()
 
 	query := request.URL.RawQuery
@@ -745,6 +735,8 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	newRequest, err := http.NewRequest(method, requestURL, nil)
 
 	if err != nil {
+		log.Println("Error:" + err.Error())
+
 		manager.setApiHeaders(writer, api)
 
 		hookManager.afterHook(hookContext, nil, err)
@@ -783,6 +775,9 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 			requestCopy.RequestURI = request.RequestURI
 			requestCopy.Header = request.Header
 			newRequest.Body = requestBodyCopy2
+
+			defer requestBodyCopy.Close()
+			defer requestBodyCopy2.Close()
 		}
 	}
 
@@ -810,7 +805,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	hookManager.afterHook(hookContext, resp, nil)
 
 	//分析头部指令等信息
-	apiConfig := ApiConfig{
+	apiConfig := ApiConfig {
 		cacheTags: []string{ "$MeloyAPI$" + api.Path },
 	}
 	manager.parseResponseHeaders(writer, request, resp, address, api, &apiConfig)
@@ -827,7 +822,8 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	resp.Body.Close()
 
 	if err != nil {
-		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		log.Println("Error:" + err.Error())
+		statManager.send(address, api.Path, uri, (time.Now().UnixNano() - t) / 1000000, 1, 0)
 		return
 	}
 
@@ -844,6 +840,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	var errors int64 = 0
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		errors ++
+		log.Println("Error: api return ", resp.Status)
 	}
 
 	statManager.send(address, api.Path, uri, (time.Now().UnixNano() - t) / 1000000, errors, 0)

@@ -53,6 +53,8 @@ type Api struct {
 	Stat ApiStat `json:"stat"`
 
 	// 分析后的数据
+	countAddresses int
+
 	patternRegexp regexp.Regexp
 	patternNames []string
 
@@ -142,6 +144,9 @@ func (api *Api) parse() {
 			api.hasResponseString = true
 		}
 	}
+
+	//地址信息
+	api.countAddresses = len(api.Addresses)
 }
 
 // 拷贝数据到另外一个API
@@ -163,6 +168,8 @@ func (api *Api) copyFrom(from Api) {
 
 		value.Elem().Field(i).Set(fieldValue)
 	}
+
+	api.countAddresses = from.countAddresses
 
 	api.patternRegexp = from.patternRegexp
 	api.patternNames = from.patternNames

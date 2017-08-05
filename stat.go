@@ -84,6 +84,8 @@ var lastTableDay string = ""
 var statMu sync.Mutex
 var statWatchLogs = []ApiWatchLog {}
 
+const STAT_WATCH_LOG_SIZE = 50
+
 // 初始化
 func (manager *StatManager) init(appDir string) {
 	manager.Data = map[string] StatData {}
@@ -252,6 +254,8 @@ func (manager *StatManager) sendDebug(address ApiAddress, path string, uri strin
 
 // 发送请求
 func (manager *StatManager) sendRequest(response *http.Response, request *http.Request) {
+	defer request.Body.Close()
+
 	t := time.Now()
 	watchLog := ApiWatchLog{
 		ID: t.UnixNano(),
@@ -265,8 +269,17 @@ func (manager *StatManager) sendRequest(response *http.Response, request *http.R
 
 	requestBytes, err := httputil.DumpRequest(request, true)
 	if err == nil {
-		watchLog.Request.Data = string(requestBytes)
+		contentLength := len(requestBytes)
+		if contentLength > 65535 {
+			requestBytes, _ = httputil.DumpRequest(request, false)
+			watchLog.Request.Data = string(requestBytes) + "[Request body too long to print, size:" + strconv.Itoa(contentLength)  + " bytes]"
+		} else {
+			watchLog.Request.Data = string(requestBytes)
+		}
+	} else {
+		watchLog.Request.Data = ""
 	}
+
 
 	responseBytes, err := httputil.DumpResponse(response, false)
 	if err == nil {
@@ -275,6 +288,9 @@ func (manager *StatManager) sendRequest(response *http.Response, request *http.R
 
 	var bodyCopy io.ReadCloser
 	bodyCopy, response.Body, err = manager.drainBody(response.Body)
+
+	defer bodyCopy.Close()
+	defer response.Body.Close()
 
 	var reader io.ReadCloser
 	switch response.Header.Get("Content-Encoding") {
@@ -285,15 +301,28 @@ func (manager *StatManager) sendRequest(response *http.Response, request *http.R
 		}
 	default:
 		reader = response.Body
+		defer reader.Close()
 	}
 
 	_bytes, _ := ioutil.ReadAll(reader)
-	watchLog.Response.Data +=  string(_bytes)
+	if len(_bytes) > 65535 {
+		watchLog.Response.Data += "[response body too long to print, size:" + strconv.Itoa(len(_bytes))  + " bytes]"
+	} else {
+		watchLog.Response.Data +=  string(_bytes)
+	}
+
 	response.Body = bodyCopy
 
+	statMu.Lock()
+	countLogs := len(statWatchLogs)
+	if countLogs > STAT_WATCH_LOG_SIZE - 1 {
+		statWatchLogs = statWatchLogs[countLogs - STAT_WATCH_LOG_SIZE + 1:]
+	}
 	statWatchLogs = append(statWatchLogs, watchLog)
+	statMu.Unlock()
 }
 
+// 复制响应内容
 func (manager *StatManager) drainBody(b io.ReadCloser) (r1, r2 io.ReadCloser, err error) {
 	if b == http.NoBody {
 		// No copying needed. Preserve the magic sentinel meaning of NoBody.
@@ -585,7 +614,12 @@ func (manager *StatManager) findHitsRank(size int) (apis []Map, err error) {
 		var path string
 		var sum float32
 
-		rows.Scan(&path, &sum)
+		err := rows.Scan(&path, &sum)
+
+		if err != nil {
+			log.Println("Error:" + err.Error())
+			continue
+		}
 
 		apis = append(apis, Map {
 			"path": path,
@@ -616,7 +650,11 @@ func (manager *StatManager) findErrorsRank(size int) (apis []Map, err error) {
 		var path string
 		var sum float32
 
-		rows.Scan(&path, &sum)
+		err := rows.Scan(&path, &sum)
+		if err != nil {
+			log.Println("Error:" + err.Error())
+			continue
+		}
 
 		apis = append(apis, Map {
 			"path": path,
@@ -647,7 +685,11 @@ func (manager *StatManager) findCostRank(size int) (apis []Map, err error) {
 		var path string
 		var sum float32
 
-		rows.Scan(&path, &sum)
+		err := rows.Scan(&path, &sum)
+		if err != nil {
+			log.Println("Error:" + err.Error())
+			continue
+		}
 
 		apis = append(apis, Map {
 			"path": path,
@@ -731,7 +773,7 @@ func (manager *StatManager) watchLogs() []ApiWatchLog {
 	var logs = []ApiWatchLog {}
 
 	var j = 0
-	var max = 50
+	var max = STAT_WATCH_LOG_SIZE
 	var count = len(statWatchLogs)
 	for i := count - 1; i >= 0 ; i -- {
 		logs = append(logs, statWatchLogs[i])
@@ -747,6 +789,11 @@ func (manager *StatManager) watchLogs() []ApiWatchLog {
 	}
 
 	return logs
+}
+
+// 清除监控日志
+func (manager *StatManager) clearWatchLogs() {
+	statWatchLogs = []ApiWatchLog{}
 }
 
 // 关闭统计管理器

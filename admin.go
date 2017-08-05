@@ -9,8 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"os/exec"
-	"bufio"
-	"io"
 	"os"
 	"time"
 	"runtime"
@@ -269,6 +267,11 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 	if path == "/@api/watch" {
 		manager.handleWatch(writer, request)
 		return 
+	}
+
+	if path == "/@api/watch/clear" {
+		manager.handleWatchClear(writer, request)
+		return
 	}
 
 	{
@@ -571,18 +574,17 @@ func (manager *AdminManager)handleGitPull(writer http.ResponseWriter, request *h
 		return
 	}
 
+	defer stdout.Close()
+
 	runErr := cmd.Start()
-	reader := bufio.NewReader(stdout)
 
-	output := ""
-	for {
-		line, readErr := reader.ReadString('\n')
-		if readErr != nil || io.EOF == readErr {
-			break
-		}
-
-		output += line
+	_bytes, err := ioutil.ReadAll(stdout)
+	if err != nil {
+		manager.writeErrorMessage(writer, request, err)
+		cmd.Wait()
+		return
 	}
+	var output = string(_bytes)
 
 	cmd.Wait()
 
@@ -614,20 +616,23 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 	load3 := "0"
 	func () {
 		cmd := exec.Command("uptime")
-		stdout, stdoutErr := cmd.StdoutPipe()
-		if stdoutErr != nil {
+		reader, readerErr := cmd.StdoutPipe()
+		if readerErr != nil {
 			return
 		}
+
+		defer reader.Close()
 
 		runErr := cmd.Start()
 		if runErr != nil {
 			return
 		}
 
-		bytes, err := ioutil.ReadAll(stdout)
+		bytes, err := ioutil.ReadAll(reader)
 		if err != nil {
 			return
 		}
+		cmd.Process.Wait()
 
 		resultString := string(bytes)
 		resultString = strings.Replace(resultString, ",", " ", -1)
@@ -651,6 +656,8 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 		"message": "Success",
 		"data": Map {
 			"memory": memoryStat.Sys,
+			"heap": memoryStat.HeapSys,
+			"heapObject": memoryStat.HeapObjects,
 			"routines": runtime.NumGoroutine(),
 			"load1m": load1,
 			"load5m": load2,
@@ -745,6 +752,18 @@ func (manager *AdminManager)handleWatch(writer http.ResponseWriter, request *htt
 		"code": 200,
 		"message": "Success",
 		"data": statManager.watchLogs(),
+	})
+}
+
+// /@api/watch/clear
+// 清除监控日志
+func (manager *AdminManager)handleWatchClear(writer http.ResponseWriter, request *http.Request)  {
+	statManager.clearWatchLogs()
+
+	manager.printJSON(writer, request, Map {
+		"code": 200,
+		"message": "Success",
+		"data": nil,
 	})
 }
 
