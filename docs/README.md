@@ -1,37 +1,78 @@
-# MeloyAPI
+# MeloyAPI指南
 
-`MeloyAPI`是使用`GO`语言编写的高性能API网关。
-
-```
-                 _________________
-Client  <-->    | MeloyAPI Server |     <--> API Server
-                |                 |
-                | [ Proxy      ]  |
-                | [ Statistics ]  |
-                | [ Monitor    ]  |
-                | [ Cache      ]  |
-                 _________________
-```
-
-## 为什么我们需要API网关？
-
-在传统的开发过程中，我们维护API的方式是在一个文档中写入每个API的输入参数、输出值等，不仅管理效率低下，而且在客户端调用过程中，对API的响应速度、调用频率等完全一无所知，导致随着业务的增长，API的增多，事情逐渐变得不可控起来。这个时候，API网关就应运而生了，`MeloyAPI`就是其中的一个实现。
-
-## MeloyAPI的目标
-
-`MeloyAPI`有三大目标需要实现：
-
-* 1、简化API管理：
-  * 一个命令启动即可使用
-  * 配合`MeloyAdmin`实现数据可视化
-  * 使用`JSON`定义简化API配置
-  * 集成`Git`，让API配置更新更简单
-  * 提供一组管理接口，可配合`MeloyAdmin`生成API文档
-* 2、优化API性能：
-  * 使用缓存、校验等功能降低API请求次数，提升API整体性能
-* 3、简化程序开发
-  * 支持简单易用的异步调用
-  * 未来会集成任务管理（`crontab`） 、锁（`lock`/`unlock`）、消息（`pub`/`sub`）等功能
+* [MeloyAPI介绍](introduction.md)
+* [安装](an-zhuang.md)
+  * [nginx代理](an-zhuang/nginxdai-li.md)
+* [配置](chapter1.md)
+  * [App\(API应用\)](chapter1/ying-yong.md)
+  * [Server\(API服务器\)](chapter1/serverfu-wu-566829.md)
+  * [Admin\(管理API\)](chapter1/adminguan-li-jie-976229.md)
+* [API配置](jie-kou-pei-zhi.md)
+  * [path\(路径\)\(必填项\)](jie-kou-pei-zhi/pathlu-5f8429.md)
+  * [address\(地址\)\(必填项\)](jie-kou-pei-zhi/addressdi-574029.md)
+  * [methods\(请求方法\)\(必填项\)](jie-kou-pei-zhi/methodsqing-qiu-fang-6cd529.md)
+  * [params\(参数\)](jie-kou-pei-zhi/paramscan-657029.md)
+  * [pattern\(匹配模式\)](jie-kou-pei-zhi/patternpi-pei-mo-5f0f29.md)
+  * [name\(名称\)](jie-kou-pei-zhi/nameming-79f029.md)
+  * [description\(描述\)](jie-kou-pei-zhi/descriptionmiao-8ff029.md)
+  * [mock\(模拟数据\)](jie-kou-pei-zhi/mockmo-ni-shu-636e29.md)
+  * [author\(作者\)](jie-kou-pei-zhi/authorzuo-800529.md)
+  * [company\(公司或机构\)](jie-kou-pei-zhi/companygong-si-huo-zu-7ec7295d.md)
+  * [isAsynchronous\(是否异步\)](jie-kou-pei-zhi/isasynchronousshi-fou-yi-6b6529.md)
+  * [timeout\(超时时间\)](jie-kou-pei-zhi/timeoutchao-shi-shi-95f429.md)
+  * [maxSize\(最大请求尺寸\)](jie-kou-pei-zhi/maxsize.md)
+  * [headers\(报头信息\)](jie-kou-pei-zhi/headersbao-tou-xin-606f29.md)
+  * [todos\(待完成事项\)](jie-kou-pei-zhi/todosdai-wan-cheng-shi-987929.md)
+  * [dones\(已完成事项\)](jie-kou-pei-zhi/donesyi-wan-cheng-shi-987929.md)
+  * [response\(返回值定义\)](jie-kou-pei-zhi/responsefan-hui-zhi-ding-4e4929.md)
+  * [roles\(角色\)](jie-kou-pei-zhi/rolesjiao-827229.md)
+  * [isDeprecated\(是否过期\)](jie-kou-pei-zhi/isdeprecatedshi-fou-guo-671f29.md)
+  * [isEnabled\(是否启用\)](jie-kou-pei-zhi/isenabledshi-fou-qi-752829.md)
+* [指令](zhi-ling.md)
+  * [Cache\(缓存\)](zhi-ling/huan-cun.md)
+  * [Debug\(调试\)](zhi-ling/debugdiao-8bd529.md)
+* [管理API](guan-li-jie-kou.md)
+  * [模拟数据](guan-li-jie-kou/mo-ni-shu-ju.md)
+    * [/@mock/:path\(输出模拟数据\)](guan-li-jie-kou/mockpath-shu-chu-mo-ni-shu-ju.md)
+  * [API管理](guan-li-jie-kou/apiguan-li.md)
+    * [/@api\(打印网关信息\)](guan-li-jie-kou/apida-yin-jie-kou-xin-606f29.md)
+    * [/@api/all\(打印所有接口列表\)](guan-li-jie-kou/apiallda-yin-suo-you-jie-kou-lie-886829.md)
+    * [/@api/reload\(重新加载API配置\)](guan-li-jie-kou/apireloadzhong-xin-jia-zai-api-pei-7f6e29.md)
+    * [/@api/\[:path\]\(单个接口的信息\)](guan-li-jie-kou/apipathdan-ge-jie-kou-de-xin-606f29.md)
+    * [/@api/\[:path\]/update\(更改单个接口的信息\)](guan-li-jie-kou/apipathupdategeng-gai-dan-ge-jie-kou-de-xin-606f29.md)
+    * [/@api/\[:path\]/delete\(删除某个API\)](guan-li-jie-kou/apipathdeleteshan-chu-mou-ge-api.md)
+    * [/@api/\[:path\]/rename/:toFile\(更改API名称\)](guan-li-jie-kou/apipathrenametofilegeng-gai-api-ming-79f029.md)
+    * [/@api/\[:path\]/year/:year/month/:month/day/:day\(当日按分钟统计\)](guan-li-jie-kou/apipathyearyearmonthmonthdaydaydang-ri-an-fen-zhong-tong-8ba129.md)
+    * [/@api/\[:path\]/debug/logs\(获取调试日志\)](guan-li-jie-kou/apipathdebuglogshuo-qu-diao-shi-ri-5fd729.md)
+    * [/@api/\[:path\]/debug/flush\(刷新调试日志\)](guan-li-jie-kou/apipathdebugflushshua-xin-diao-shi-ri-5fd729.md)
+    * [/@api/watch\(监控请求\)](guan-li-jie-kou/apiwatch.md)
+    * [/@api/watch/clear\(清除请求日志\)](guan-li-jie-kou/apiwatchclearqing-chu-qing-qiu-ri-5fd729.md)
+  * [缓存](guan-li-jie-kou/huan-cun.md)
+    * [/@cache/tag/:tag\(标签相关信息\)](guan-li-jie-kou/cachetagtagbiao-qian-xiang-guan-xin-606f29.md)
+    * [/@cache/tag/:tag/delete\(删除标签\)](guan-li-jie-kou/cachetagtagdeleteshan-chu-biao-7b7e29.md)
+    * [/@cache/\[:path\]/clear\(清除某个API关联的缓存\)](guan-li-jie-kou/cachepathclearqing-chu-mou-ge-api-guan-lian-de-huan-5b5829.md)
+    * [/@cache/clear\(清除所有缓存\)](guan-li-jie-kou/cacheclearqing-chu-suo-you-huan-5b5829.md)
+  * [统计](guan-li-jie-kou/tong-ji.md)
+    * [/@api/stat\(整体统计\)](guan-li-jie-kou/tong-ji/apistatzheng-ti-tong-8ba129.md)
+    * [/@api/stat/requests/rank\(按照请求数排名\)](guan-li-jie-kou/tong-ji/apistatrequestsrankan-zhao-qing-qiu-shu-pai-540d29.md)
+    * [/@api/stat/hits/rank\(按照缓存命中率排名\)](guan-li-jie-kou/tong-ji/apistathitsrankan-zhao-huan-cun-ming-zhong-lv-pai-540d29.md)
+    * [/@api/stat/errors/rank\(按照错误率排名\)](guan-li-jie-kou/tong-ji/apistaterrorsrankan-zhao-cuo-wu-lv-pai-540d29.md)
+    * [/@api/stat/cost/rank\(按照请求耗时排名\)](guan-li-jie-kou/tong-ji/apistatcostrankan-zhao-qing-qiu-hao-shi-pai-540d29.md)
+  * [Git](guan-li-jie-kou/git.md)
+    * [/@git/pull\(在MeloyAPI安装根目录下执行git pull\)](guan-li-jie-kou/gitpullzai-meloyapi-an-zhuang-gen-mu-lu-xia-zhi-xing-git-pull.md)
+  * 监控
+    * [/@monitor\(取得监控信息\)](guan-li-jie-kou/monitorqu-de-jian-kong-xin-606f29.md)
+* [命令行](ming-ling-xing.md)
+  * [meloy-api start](ming-ling-xing/meloy-api-start.md)
+  * [meloy-api stop](ming-ling-xing/meloy-api-stop.md)
+  * [meloy-api restart](ming-ling-xing/meloy-api-restart.md)
+  * [meloy-api reload](ming-ling-xing/meloy-api-reload.md)
+  * [meloy-api debug](ming-ling-xing/meloy-api-debug.md)
+  * [meloy-api create](ming-ling-xing/meloy-api-create.md)
+  * [meloy-api version](ming-ling-xing/meloy-api-version.md)
+  * [meloy-api help](ming-ling-xing/meloy-api-help.md)
+* [插件](cha-jian.md)
+  * [Hooks\(钩子\)](cha-jian/hooksgou-5b5029.md)
 
 
 

@@ -1,6 +1,7 @@
 # Summary
 
-* [MeloyAPI介绍](README.md)
+* [文档目录](README.md)
+* [MeloyAPI介绍](/introduction.md)
 * [安装](an-zhuang.md)
   * [nginx代理](an-zhuang/nginxdai-li.md)
 * [配置](chapter1.md)
