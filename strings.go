@@ -17,7 +17,7 @@ func containsString(slice []string, item string) bool {
 }
 
 // 从字符串中分析尺寸
-func parseSizeFromString(sizeString string) (float64, error)  {
+func parseSizeFromString(sizeString string) (float64, error) {
 	if len(sizeString) == 0 {
 		return 0, nil
 	}

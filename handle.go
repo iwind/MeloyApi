@@ -6,13 +6,13 @@ import (
 
 // API Handler管理器
 type HandlerManager struct {
-	handlers map[string] *ApiHandler
+	handlers map[string]*ApiHandler
 }
 
 // API处理器
 type ApiHandler struct {
 	http.HandlerFunc
-	Api *Api
+	Api       *Api
 	isEnabled bool
 }
 
@@ -23,7 +23,7 @@ type ApiHasHandleFunc interface {
 
 // 初始化
 func (manager *HandlerManager) init() {
-	manager.handlers = map[string] *ApiHandler{}
+	manager.handlers = map[string]*ApiHandler{}
 }
 
 // 设置处理函数
@@ -43,7 +43,7 @@ func (manager *HandlerManager) handle(w http.ResponseWriter, r *http.Request) {
 	if handler, ok := manager.handlers[path]; ok && handler.isEnabled {
 		handler.ServeHTTP(w, r)
 	} else {
-		http.Error(w, "404 page not found (" + path + ")", http.StatusNotFound)
+		http.Error(w, "404 page not found ("+path+")", http.StatusNotFound)
 	}
 }
 

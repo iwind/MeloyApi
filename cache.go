@@ -10,19 +10,19 @@ import (
 type CacheManager struct {
 	MaxSize int
 
-	Values map[string] CacheEntry
-	Tags map[string] map[string]string // tag [key] map[key] ""
+	Values map[string]CacheEntry
+	Tags   map[string]map[string]string // tag [key] map[key] ""
 
 	Mutex sync.RWMutex
 }
 
 // 缓存条目
 type CacheEntry struct {
-	Bytes []byte
-	Header http.Header
-	LifeMs int64
+	Bytes       []byte
+	Header      http.Header
+	LifeMs      int64
 	ExpiredAtMs int64
-	Tags []string
+	Tags        []string
 }
 
 var cacheInitOnce sync.Once
@@ -32,15 +32,15 @@ func (manager *CacheManager) init() {
 	manager.MaxSize = 1024 * 1024 * 10
 
 	cacheInitOnce.Do(func() {
-		manager.Values = make(map[string] CacheEntry)
-		manager.Tags = make(map[string] map[string]string)
+		manager.Values = make(map[string]CacheEntry)
+		manager.Tags = make(map[string]map[string]string)
 	})
 
 	//每一分钟清理一次过期的条目
 	go func() {
 		tick := time.Tick(1 * time.Minute)
 		for {
-			<- tick
+			<-tick
 
 			manager.clearExpired()
 		}
@@ -51,7 +51,7 @@ func (manager *CacheManager) init() {
 func (manager *CacheManager) clearExpired() {
 	//清除过期条目
 	for key, value := range manager.Values {
-		if value.ExpiredAtMs < int64(time.Now().UnixNano() / 1000000) {
+		if value.ExpiredAtMs < int64(time.Now().UnixNano()/1000000) {
 			manager.deleteValue(key)
 		}
 	}
@@ -81,8 +81,8 @@ func (manager *CacheManager) clearAll() (count int) {
 	defer manager.Mutex.Unlock()
 
 	count = len(manager.Values)
-	manager.Values = make(map[string] CacheEntry)
-	manager.Tags = make(map[string] map[string]string)
+	manager.Values = make(map[string]CacheEntry)
+	manager.Tags = make(map[string]map[string]string)
 	return
 }
 
@@ -124,15 +124,15 @@ func (manager *CacheManager) set(key string, tags []string, _bytes []byte, heade
 	defer manager.Mutex.Unlock()
 
 	if tags == nil {
-		tags = []string {}
+		tags = []string{}
 	}
 
-	manager.Values[key] = CacheEntry {
-		Bytes: _bytes,
-		Header: header,
-		LifeMs: lifeMs,
+	manager.Values[key] = CacheEntry{
+		Bytes:       _bytes,
+		Header:      header,
+		LifeMs:      lifeMs,
 		ExpiredAtMs: nowMs + lifeMs,
-		Tags: tags,
+		Tags:        tags,
 	}
 
 	//设置tag
@@ -140,7 +140,7 @@ func (manager *CacheManager) set(key string, tags []string, _bytes []byte, heade
 		for _, tag := range tags {
 			keyMapping, ok := manager.Tags[tag]
 			if !ok {
-				keyMapping = make(map [string] string)
+				keyMapping = make(map[string]string)
 			}
 
 			keyMapping[key] = ""
@@ -161,7 +161,7 @@ func (manager *CacheManager) get(key string) (entry CacheEntry, ok bool) {
 		return
 	}
 
-	if entry.ExpiredAtMs < int64(time.Now().UnixNano() / 1000000) {
+	if entry.ExpiredAtMs < int64(time.Now().UnixNano()/1000000) {
 		manager.deleteValue(key)
 		ok = false
 		return
@@ -207,7 +207,7 @@ func (manager *CacheManager) deleteValue(key string) {
 // 统计标签信息
 // 只取前1000个标签
 func (manager *CacheManager) statTag(tag string) (count int, keys []string, ok bool) {
-	keys = []string {}
+	keys = []string{}
 
 	if manager.Tags == nil {
 		ok = false

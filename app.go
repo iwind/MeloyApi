@@ -22,17 +22,17 @@ import (
 const MELOY_API_VERSION = "1.0"
 
 type AppManager struct {
-	AppDir string
+	AppDir  string
 	IsDebug bool
 }
 
 type Host struct {
 	Address string
-	Weight int
+	Weight  int
 }
 
 type Server struct {
-	Code string
+	Code  string
 	Hosts []Host
 
 	Request struct {
@@ -40,7 +40,7 @@ type Server struct {
 		MaxSize string
 
 		timeoutDuration time.Duration
-		maxSizeBits float64
+		maxSizeBits     float64
 	}
 }
 
@@ -50,7 +50,7 @@ type AppConfig struct {
 	Port int
 	SSL struct {
 		Cert string
-		Key string
+		Key  string
 	}
 
 	Allow struct {
@@ -64,19 +64,19 @@ type AppConfig struct {
 	Limits struct {
 		Requests struct {
 			Minute int
-			Day int
+			Day    int
 		}
 	}
 
 	Users []struct {
-		Type string
+		Type     string
 		Username string
 		Password string
 	}
 
 	//是否有限制
 	hasAllow bool
-	hasDeny bool
+	hasDeny  bool
 
 	//监听
 	isWatching bool
@@ -84,32 +84,32 @@ type AppConfig struct {
 
 	//限流
 	hasMinuteLimit bool
-	hasDayLimit bool
+	hasDayLimit    bool
 
 	limitLastMinute string
-	limitLastDay string
+	limitLastDay    string
 
 	limitMinuteLeft int
-	limitDayLeft int
+	limitDayLeft    int
 
 	//用户限制
 	hasUsers bool
 }
 
 type ApiConfig struct {
-	cacheTags []string
+	cacheTags   []string
 	cacheLifeMs int64
 }
 
 type ApiAddress struct {
 	Server string
-	Host string
-	URL string
+	Host   string
+	URL    string
 }
 
 type ApiParam struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
 	Description string `json:"description"`
 }
 
@@ -134,7 +134,7 @@ func Start(appDir string) {
 	appManager.AppDir = appDir
 
 	// 检查data/, logs/目录是否存在
-	for _, dir := range []string { "data", "logs" } {
+	for _, dir := range []string{"data", "logs"} {
 		systemDir := appDir + string(os.PathSeparator) + dir
 		if exists, _ := FileExists(systemDir); !exists {
 			log.Println("create dir '" + dir + "'")
@@ -147,7 +147,7 @@ func Start(appDir string) {
 	}
 
 	// 写入PID
-	err := ioutil.WriteFile(appDir + "/data/pid", []byte(strconv.Itoa(os.Getpid())), 0644)
+	err := ioutil.WriteFile(appDir+"/data/pid", []byte(strconv.Itoa(os.Getpid())), 0644)
 	if err != nil {
 		log.Fatal(err)
 		return
@@ -155,7 +155,7 @@ func Start(appDir string) {
 
 	// 日志
 	if len(os.Args) != 1 && !appManager.IsDebug {
-		logFile, err := os.OpenFile(appManager.AppDir + "/logs/meloy.log", os.O_APPEND | os.O_WRONLY | os.O_CREATE, os.ModeAppend)
+		logFile, err := os.OpenFile(appManager.AppDir+"/logs/meloy.log", os.O_APPEND|os.O_WRONLY|os.O_CREATE, os.ModeAppend)
 		if err != nil {
 			log.Fatal(err)
 			return
@@ -201,7 +201,7 @@ func Start(appDir string) {
 	appManager.reload()
 
 	//启动Server
-	go func () {
+	go func() {
 		err = nil
 		if len(appConfig.SSL.Key) == 0 || len(appConfig.SSL.Cert) == 0 {
 			err = http.ListenAndServe(address, serverMux)
@@ -213,7 +213,7 @@ func Start(appDir string) {
 		const escape = "\x1b"
 		if err != nil {
 			if appManager.IsDebug {
-				log.Fatal(fmt.Sprintf("%s[1;31mFailed to start app server, error:" + err.Error() + "%s[0m", escape, escape))
+				log.Fatal(fmt.Sprintf("%s[1;31mFailed to start app server, error:"+err.Error()+"%s[0m", escape, escape))
 			} else {
 				log.Fatal("Failed to start app server, error:" + err.Error())
 			}
@@ -231,7 +231,7 @@ func Start(appDir string) {
 }
 
 // 取得钩子管理器
-func GetHookManager() (*HookManager)  {
+func GetHookManager() (*HookManager) {
 	return &hookManager
 }
 
@@ -265,7 +265,7 @@ func (manager *AppManager) isCommand() (isCommand bool) {
 			return
 		} else if command == "create" {
 			manager.createCommand()
-			return 
+			return
 		}
 
 		isCommand = false
@@ -298,7 +298,7 @@ func (manager *AppManager) startCommand() {
 }
 
 // 停止进程
-func (manager *AppManager) stopCommand()  {
+func (manager *AppManager) stopCommand() {
 	log.Println("stopping the server ...")
 
 	process, err := manager.findRunningProcess()
@@ -320,7 +320,7 @@ func (manager *AppManager) stopCommand()  {
 }
 
 // 重启服务
-func (manager *AppManager) restartCommand()  {
+func (manager *AppManager) restartCommand() {
 	manager.stopCommand()
 	time.Sleep(time.Microsecond * 100)
 	manager.startCommand()
@@ -343,7 +343,7 @@ func (manager *AppManager) reloadCommand() {
 }
 
 // 打印帮助
-func (manager *AppManager) helpCommand()  {
+func (manager *AppManager) helpCommand() {
 	fmt.Println(`Usage:
   ./meloy-api
   	Start server sliently
@@ -375,7 +375,7 @@ func (manager *AppManager) helpCommand()  {
 }
 
 // 打印版本信息
-func (manager *AppManager) versionCommand()  {
+func (manager *AppManager) versionCommand() {
 	fmt.Println("  MeloyAPI v" + MELOY_API_VERSION)
 	fmt.Println("  GitHub: https://github.com/iwind/MeloyApi")
 	fmt.Println("  Author: Liu Xiang Chao")
@@ -384,12 +384,11 @@ func (manager *AppManager) versionCommand()  {
 }
 
 // 创建API
-func (manager *AppManager) createCommand()  {
+func (manager *AppManager) createCommand() {
 	if len(os.Args) <= 2 {
 		fmt.Print("Usage: ./meloy-api create [API Code]\n\n")
 		return
 	}
-
 
 	serverCode := "代号"
 	servers := manager.loadServers()
@@ -400,10 +399,10 @@ func (manager *AppManager) createCommand()  {
 	code := os.Args[2]
 	apiFile := manager.AppDir + "/apis/" + code + ".json"
 	err := ioutil.WriteFile(apiFile, []byte(`{
-  "path": "/` + strings.Replace(code, "_", "/", -1) + `",
+  "path": "/`+ strings.Replace(code, "_", "/", -1)+ `",
   "name": "接口名称",
   "description": "接口描述",
-  "address": "%{server.` + serverCode + `}%{api.path}",
+  "address": "%{server.`+ serverCode+ `}%{api.path}",
   "methods": [ "get", "post" ],
   "params": [
     {
@@ -466,7 +465,7 @@ func (manager *AppManager) reload() {
 	//服务器配置
 	servers := appManager.loadServers()
 	ApiArray = []Api{}
-	appManager.loadApis(manager.AppDir + string(os.PathSeparator) + "apis", servers, &ApiArray)
+	appManager.loadApis(manager.AppDir+string(os.PathSeparator)+"apis", servers, &ApiArray)
 
 	handlerManager.disableAll()
 
@@ -474,7 +473,7 @@ func (manager *AppManager) reload() {
 	if !serverMuxLoaded {
 		serverMuxLoaded = true
 
-		serverMux.HandleFunc("/", func (writer http.ResponseWriter, request *http.Request) {
+		serverMux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
 			// @TODO 需要更好的性能
 			for _, api := range ApiArray {
 				if !api.IsEnabled {
@@ -485,7 +484,7 @@ func (manager *AppManager) reload() {
 
 					values := url.Values{}
 					for index, name := range api.patternNames {
-						values.Add(name, matches[index + 1])
+						values.Add(name, matches[index+1])
 					}
 
 					if len(request.URL.RawQuery) == 0 {
@@ -503,16 +502,15 @@ func (manager *AppManager) reload() {
 		})
 	}
 
-
 	//处理路径
 	for _, api := range ApiArray {
-		log.Println("load api '" + api.Path + "' from '" + strings.TrimPrefix(api.File, manager.AppDir + string(os.PathSeparator) + "apis" + string(os.PathSeparator)) + "'")
+		log.Println("load api '" + api.Path + "' from '" + strings.TrimPrefix(api.File, manager.AppDir+string(os.PathSeparator)+"apis"+string(os.PathSeparator)) + "'")
 
 		if !api.IsEnabled {
 			continue
 		}
 
-		func (api Api) {
+		func(api Api) {
 			handler, ok := handlerManager.find(api.Path)
 			if ok {
 				handler.isEnabled = true
@@ -530,7 +528,7 @@ func (manager *AppManager) reload() {
 }
 
 // 等待处理请求
-func (manager *AppManager) wait()  {
+func (manager *AppManager) wait() {
 	defer statManager.closeDb()
 
 	//Hold住进程
@@ -569,7 +567,7 @@ func (manager *AppManager) loadServers() (servers []Server) {
 		if len(server.Request.MaxSize) > 0 {
 			size, err := parseSizeFromString(server.Request.MaxSize)
 			if err != nil {
-				log.Println("Parse " + server.Request.MaxSize + " Error:", err.Error())
+				log.Println("Parse "+server.Request.MaxSize+" Error:", err.Error())
 			} else {
 				servers[index].Request.maxSizeBits = size
 			}
@@ -616,7 +614,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 
 	for _, file := range files {
 		if file.IsDir() {
-			manager.loadApis(apiDir + string(os.PathSeparator) + file.Name(), servers, apis)
+			manager.loadApis(apiDir+string(os.PathSeparator)+file.Name(), servers, apis)
 			continue
 		}
 
@@ -635,7 +633,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 			continue
 		}
 
-		var api = Api {
+		var api = Api{
 			IsEnabled: true,
 		}
 
@@ -694,20 +692,20 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 				address = pathReg.ReplaceAllString(address, api.Path)
 
 				if totalWeight == 0 {
-					api.Addresses = append(api.Addresses, ApiAddress {
-						Server:server.Code,
-						Host: host.Address,
-						URL: address,
+					api.Addresses = append(api.Addresses, ApiAddress{
+						Server: server.Code,
+						Host:   host.Address,
+						URL:    address,
 					})
 					continue
 				}
 
 				weight := int(host.Weight * 10 / totalWeight)
 				for i := 0; i < weight; i ++ {
-					api.Addresses = append(api.Addresses, ApiAddress {
-						Server:server.Code,
-						Host: host.Address,
-						URL: address,
+					api.Addresses = append(api.Addresses, ApiAddress{
+						Server: server.Code,
+						Host:   host.Address,
+						URL:    address,
 					})
 				}
 			}
@@ -770,15 +768,14 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 		address = api.Addresses[0]
 	}
 
-
 	// 检查method
 	method := strings.ToUpper(request.Method)
 	if !containsString(api.Methods, method) {
-		fmt.Fprintln(writer, "'" + request.Method + "' method is not supported")
+		fmt.Fprintln(writer, "'"+request.Method+"' method is not supported")
 		return
 	}
 
-	hookManager.beforeHook(writer, request, api, func (hookContext *HookContext) {
+	hookManager.beforeHook(writer, request, api, func(hookContext *HookContext) {
 		if api.IsAsynchronous {
 			manager.setApiHeaders(writer, api)
 			writer.Write([]byte(api.responseString))
@@ -816,11 +813,10 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		manager.setApiHeaders(writer, api)
 		writer.Write(cacheEntry.Bytes)
 
-		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 0, 1)
+		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano()-t)/1000000, 0, 1)
 
 		return
 	}
-
 
 	requestURL := address.URL
 	uri := request.RequestURI
@@ -836,7 +832,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		manager.setApiHeaders(writer, api)
 
 		hookManager.afterHook(hookContext, nil, err)
-		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano()-t)/1000000, 1, 0)
 		return
 	}
 
@@ -854,7 +850,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	//是否正在watch
 	var isWatching = false
 	if appConfig.isWatching {
-		if appConfig.watchingAt > time.Now().Unix() - 60 {
+		if appConfig.watchingAt > time.Now().Unix()-60 {
 			isWatching = true
 		} else {
 			appConfig.isWatching = false
@@ -897,7 +893,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		hookManager.afterHook(hookContext, nil, err)
 
 		//统计
-		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano()-t)/1000000, 1, 0)
 		return
 	}
 
@@ -912,13 +908,13 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	hookManager.afterHook(hookContext, resp, nil)
 
 	//分析头部指令等信息
-	apiConfig := ApiConfig {
-		cacheTags: []string{ "$MeloyAPI$" + api.Path },
+	apiConfig := ApiConfig{
+		cacheTags: []string{"$MeloyAPI$" + api.Path},
 	}
 	manager.parseResponseHeaders(writer, request, resp, address, api, &apiConfig)
 	manager.setApiHeaders(writer, api)
 
-	_bytes := []byte {}
+	_bytes := []byte{}
 	if api.hasResponseString {
 		err = nil
 		_bytes = []byte(api.responseString)
@@ -930,7 +926,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 
 	if err != nil {
 		log.Println("Error:" + err.Error())
-		statManager.send(address, api.Path, uri, (time.Now().UnixNano() - t) / 1000000, 1, 0)
+		statManager.send(address, api.Path, uri, (time.Now().UnixNano()-t)/1000000, 1, 0)
 		return
 	}
 
@@ -950,15 +946,15 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		log.Println("Error: api return ", resp.Status)
 	}
 
-	statManager.send(address, api.Path, uri, (time.Now().UnixNano() - t) / 1000000, errors, 0)
+	statManager.send(address, api.Path, uri, (time.Now().UnixNano()-t)/1000000, errors, 0)
 }
 
 // 分析响应头部
-func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, request *http.Request, resp *http.Response, address ApiAddress, api *Api, apiConfig *ApiConfig)  {
+func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, request *http.Request, resp *http.Response, address ApiAddress, api *Api, apiConfig *ApiConfig) {
 	directiveReg, _ := ReuseRegexpCompile("^Meloy-Api-(.+)")
 
 	for key, values := range resp.Header {
-		if containsString([]string { "Connection", "Server" }, key) {
+		if containsString([]string{"Connection", "Server"}, key) {
 			continue
 		}
 
@@ -1094,7 +1090,7 @@ func (manager *AppManager) findRunningProcess() (process *os.Process, err error)
 }
 
 // 设置是否监听
-func (manager *AppManager)setWatching(isWatching bool)  {
+func (manager *AppManager) setWatching(isWatching bool) {
 	appConfig.isWatching = isWatching
 	appConfig.watchingAt = time.Now().Unix()
 }
@@ -1134,7 +1130,7 @@ func (manager *AppManager) validateRequest(request *http.Request) bool {
 
 	//本地的
 	if appConfig.Host == "0.0.0.0" && ip == "[::1]" {
-		return  true
+		return true
 	}
 
 	//禁止的
@@ -1194,7 +1190,7 @@ func (manager *AppManager) reachLimit() bool {
 // 设置API头部信息
 func (manager *AppManager) setApiHeaders(writer http.ResponseWriter, api *Api) {
 	//写入Headers
-	if len(api.Headers)  == 0 {
+	if len(api.Headers) == 0 {
 		return
 	}
 

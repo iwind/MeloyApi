@@ -16,7 +16,6 @@ import (
 )
 
 type AdminManager struct {
-
 }
 
 type AdminConfig struct {
@@ -24,7 +23,7 @@ type AdminConfig struct {
 	Port int
 	SSL struct {
 		Cert string
-		Key string
+		Key  string
 	}
 
 	Allow struct {
@@ -35,14 +34,14 @@ type AdminConfig struct {
 	}
 
 	hasAllow bool
-	hasDeny bool
+	hasDeny  bool
 }
 
 var adminConfig AdminConfig
-var adminApiMapping map[string] Api
+var adminApiMapping map[string]Api
 
 // 加载Admin
-func (manager *AdminManager)Load(appDir string)  {
+func (manager *AdminManager) Load(appDir string) {
 	bytes, err := ioutil.ReadFile(appDir + "/config/admin.json")
 	if err != nil {
 		log.Println("Error:" + err.Error())
@@ -76,7 +75,7 @@ func (manager *AdminManager)Load(appDir string)  {
 		serverMux := http.NewServeMux()
 		serverMux.HandleFunc("/", manager.handleRequest)
 		serverMux.Handle("/web/", http.StripPrefix("/web/",
-				http.FileServer(http.Dir(appDir + string(os.PathSeparator) + "web" + string(os.PathSeparator)))))
+			http.FileServer(http.Dir(appDir+string(os.PathSeparator)+"web"+string(os.PathSeparator)))))
 
 		err = nil
 		if len(adminConfig.SSL.Key) == 0 || len(adminConfig.SSL.Cert) == 0 {
@@ -89,7 +88,7 @@ func (manager *AdminManager)Load(appDir string)  {
 		const escape = "\x1b"
 		if err != nil {
 			if appManager.IsDebug {
-				log.Fatal(fmt.Sprintf("%s[1;31mFailed to start admin server, error:" + err.Error() + "%s[0m", escape, escape))
+				log.Fatal(fmt.Sprintf("%s[1;31mFailed to start admin server, error:"+err.Error()+"%s[0m", escape, escape))
 			} else {
 				log.Fatal("Failed to start admin server, error:" + err.Error())
 			}
@@ -98,15 +97,15 @@ func (manager *AdminManager)Load(appDir string)  {
 }
 
 // 重新加载数据
-func (manager *AdminManager)Reload() {
-	adminApiMapping = make(map [string] Api)
+func (manager *AdminManager) Reload() {
+	adminApiMapping = make(map[string]Api)
 	for _, api := range ApiArray {
 		adminApiMapping[api.Path] = api //@TODO 支持  /:name/:age => /abc/123
 	}
 }
 
 // 处理请求
-func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *http.Request)  {
+func (manager *AdminManager) handleRequest(writer http.ResponseWriter, request *http.Request) {
 	request.ParseForm()
 	if request.Form.Get("_editor") == "true" {
 		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -295,7 +294,7 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 
 	if path == "/@api/watch" {
 		manager.handleWatch(writer, request)
-		return 
+		return
 	}
 
 	if path == "/@api/watch/clear" {
@@ -304,27 +303,27 @@ func (manager *AdminManager)handleRequest(writer http.ResponseWriter, request *h
 	}
 
 	{
-		fmt.Fprint(writer, "404 page not found (" + path + ")")
+		fmt.Fprint(writer, "404 page not found ("+path+")")
 	}
 }
 
 // /@api
 // 处理API根目录请求
-func (manager *AdminManager)handleIndex(writer http.ResponseWriter, request *http.Request) {
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+func (manager *AdminManager) handleIndex(writer http.ResponseWriter, request *http.Request) {
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
-			"version": MELOY_API_VERSION,
+		"data": Map{
+			"version":   MELOY_API_VERSION,
 			"goVersion": runtime.Version(),
-			"goRoot": runtime.GOROOT(),
+			"goRoot":    runtime.GOROOT(),
 		},
 	})
 }
 
 // /@mock/:path
 // 输出模拟数据
-func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Request, path string) {
+func (manager *AdminManager) handleMock(writer http.ResponseWriter, _ *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	if ok && len(api.Mock) > 0 {
 		//删除注释以避免JSON解析错误
@@ -340,51 +339,51 @@ func (manager *AdminManager)handleMock(writer http.ResponseWriter, _ *http.Reque
 
 // /@api/[:path]
 // 输出某个API信息
-func (manager *AdminManager)handleApi(writer http.ResponseWriter, request *http.Request, path string) {
+func (manager *AdminManager) handleApi(writer http.ResponseWriter, request *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	if !ok {
-		manager.printJSON(writer, request, Map {
-			"code": 404,
+		manager.printJSON(writer, request, Map{
+			"code":    404,
 			"message": "Not Found",
-			"data": Api{},
+			"data":    Api{},
 		})
 	} else {
-		manager.printJSON(writer, request, Map {
-			"code": 200,
+		manager.printJSON(writer, request, Map{
+			"code":    200,
 			"message": "Success",
-			"data": api,
+			"data":    api,
 		})
 	}
 }
 
 // /@api/path/year/:year/month/:month/day/:day
 // 日统计
-func (manager *AdminManager)handleApiDay(writer http.ResponseWriter, request *http.Request, path string, year int, month int, day int) {
+func (manager *AdminManager) handleApiDay(writer http.ResponseWriter, request *http.Request, path string, year int, month int, day int) {
 	apiStat := statManager.findAvgStatForDay(path, year, month, day)
 	minutes := statManager.findMinuteStatForDay(path, year, month, day)
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
-			"avgMs": apiStat.AvgMs,
+		"data": Map{
+			"avgMs":    apiStat.AvgMs,
 			"requests": apiStat.Requests,
-			"hits": apiStat.Hits,
-			"errors": apiStat.Errors,
-			"minutes": minutes,
+			"hits":     apiStat.Hits,
+			"errors":   apiStat.Errors,
+			"minutes":  minutes,
 		},
 	})
 }
 
 // /@api/[:path]/delete
 // 删除API
-func (manager *AdminManager)handleApiDelete(writer http.ResponseWriter, request *http.Request, path string) {
+func (manager *AdminManager) handleApiDelete(writer http.ResponseWriter, request *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	if !ok {
-		manager.printJSON(writer, request, Map {
-			"code": 404,
+		manager.printJSON(writer, request, Map{
+			"code":    404,
 			"message": "Not found",
-			"data": nil,
+			"data":    nil,
 		})
 	} else {
 		now := time.Now()
@@ -393,31 +392,31 @@ func (manager *AdminManager)handleApiDelete(writer http.ResponseWriter, request 
 		os.Rename(api.File, newFile)
 		appManager.reload()
 
-		manager.printJSON(writer, request, Map {
-			"code": 200,
+		manager.printJSON(writer, request, Map{
+			"code":    200,
 			"message": "Success",
-			"data": newFile,
+			"data":    newFile,
 		})
 	}
 }
 
 // /@api/[:path]/update
 // 更改API信息
-func (manager *AdminManager)handleApiUpdate(writer http.ResponseWriter, request *http.Request, path string) {
+func (manager *AdminManager) handleApiUpdate(writer http.ResponseWriter, request *http.Request, path string) {
 	api, ok := adminApiMapping[path]
 	if !ok {
-		manager.printJSON(writer, request, Map {
-			"code": 404,
+		manager.printJSON(writer, request, Map{
+			"code":    404,
 			"message": "Not found",
-			"data": nil,
+			"data":    nil,
 		})
 	} else {
 		newBytes, err := ioutil.ReadAll(request.Body)
 		if err != nil {
-			manager.printJSON(writer, request, Map {
-				"code": 500,
+			manager.printJSON(writer, request, Map{
+				"code":    500,
 				"message": err.Error(),
-				"data": nil,
+				"data":    nil,
 			})
 			return
 		}
@@ -427,70 +426,70 @@ func (manager *AdminManager)handleApiUpdate(writer http.ResponseWriter, request 
 
 		appManager.reload()
 
-		manager.printJSON(writer, request, Map {
-			"code": 200,
+		manager.printJSON(writer, request, Map{
+			"code":    200,
 			"message": "Success",
-			"data": nil,
+			"data":    nil,
 		})
 	}
 }
 
 // /@api/[:path]/rename
 // 更改API文件名称
-func (manager *AdminManager)handleApiRename(writer http.ResponseWriter, request *http.Request, path string, toFile string) {
+func (manager *AdminManager) handleApiRename(writer http.ResponseWriter, request *http.Request, path string, toFile string) {
 	api, ok := adminApiMapping[path]
 	if !ok {
-		manager.printJSON(writer, request, Map {
-			"code": 404,
+		manager.printJSON(writer, request, Map{
+			"code":    404,
 			"message": "Not found",
-			"data": nil,
+			"data":    nil,
 		})
 	} else {
 		newFile := appManager.AppDir + string(os.PathSeparator) + "apis" + string(os.PathSeparator) + toFile
 		os.Rename(api.File, newFile)
 		appManager.reload()
 
-		manager.printJSON(writer, request, Map {
-			"code": 200,
+		manager.printJSON(writer, request, Map{
+			"code":    200,
 			"message": "Success",
-			"data": newFile,
+			"data":    newFile,
 		})
 	}
 }
 
 // /@api/[:path]/debug/logs
 // 打印调试日志
-func (manager *AdminManager)handleDebugLogs(writer http.ResponseWriter, request *http.Request, path string) {
+func (manager *AdminManager) handleDebugLogs(writer http.ResponseWriter, request *http.Request, path string) {
 	logs := statManager.findDebugLogsForPath(path)
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
+		"data": Map{
 			"count": len(logs),
-			"logs": logs,
+			"logs":  logs,
 		},
 	})
 }
 
 // /@api/[:path]/debug/flush
 // 刷新调试日志
-func (manager *AdminManager)handleDebugFlush(writer http.ResponseWriter, request *http.Request, _ string) {
+func (manager *AdminManager) handleDebugFlush(writer http.ResponseWriter, request *http.Request, _ string) {
 	err, count := statManager.flushDebugLogs()
 	if err != nil {
-		manager.printJSON(writer, request, Map {
-			"code": 500,
+		manager.printJSON(writer, request, Map{
+			"code":    500,
 			"message": err.Error(),
-			"data": Map {
+			"data": Map{
 				"count": count,
 			},
 		})
 		return
 	}
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
+		"data": Map{
 			"count": count,
 		},
 	})
@@ -498,7 +497,7 @@ func (manager *AdminManager)handleDebugFlush(writer http.ResponseWriter, request
 
 // /@api/all
 // 输出所有API信息
-func (manager *AdminManager)handleApis(writer http.ResponseWriter, request *http.Request) {
+func (manager *AdminManager) handleApis(writer http.ResponseWriter, request *http.Request) {
 	//统计相关
 	var arr = ApiArray
 	for index, api := range arr {
@@ -506,34 +505,34 @@ func (manager *AdminManager)handleApis(writer http.ResponseWriter, request *http
 		arr[index] = api
 	}
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": ApiArray,
+		"data":    ApiArray,
 	})
 }
 
 // /@api/reload
 // 刷新API配置
-func (manager *AdminManager)handleReloadApis(writer http.ResponseWriter, request *http.Request) {
+func (manager *AdminManager) handleReloadApis(writer http.ResponseWriter, request *http.Request) {
 	appManager.reload()
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": nil,
+		"data":    nil,
 	})
 }
 
 // /@cache/clear
 // 清除所有缓存
-func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter, request *http.Request) {
+func (manager *AdminManager) handleCacheClear(writer http.ResponseWriter, request *http.Request) {
 	count := cacheManager.clearAll()
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
+		"data": Map{
 			"count": count,
 		},
 	})
@@ -541,13 +540,13 @@ func (manager *AdminManager)handleCacheClear(writer http.ResponseWriter, request
 
 // /@cache/[:path]/clear
 // 清除某个API对应的所有Cache
-func (manager *AdminManager)handleCacheClearPath(writer http.ResponseWriter, request *http.Request, path string)  {
+func (manager *AdminManager) handleCacheClearPath(writer http.ResponseWriter, request *http.Request, path string) {
 	count := cacheManager.deleteTag("$MeloyAPI$" + path)
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
+		"data": Map{
 			"count": count,
 		},
 	})
@@ -555,13 +554,13 @@ func (manager *AdminManager)handleCacheClearPath(writer http.ResponseWriter, req
 
 // /@cache/tag/:tag/delete
 // 删除某个标签对应的缓存
-func (manager *AdminManager)handleCacheDeleteTag(writer http.ResponseWriter, request *http.Request, tag string) {
+func (manager *AdminManager) handleCacheDeleteTag(writer http.ResponseWriter, request *http.Request, tag string) {
 	count := cacheManager.deleteTag(tag)
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
+		"data": Map{
 			"count": count,
 		},
 	})
@@ -569,24 +568,24 @@ func (manager *AdminManager)handleCacheDeleteTag(writer http.ResponseWriter, req
 
 // /@cache/tag/:tag
 // 打印某个标签信息
-func (manager *AdminManager)handleCacheTagInfo(writer http.ResponseWriter, request *http.Request, tag string) {
+func (manager *AdminManager) handleCacheTagInfo(writer http.ResponseWriter, request *http.Request, tag string) {
 	count, keys, ok := cacheManager.statTag(tag)
 	if !ok {
-		manager.printJSON(writer, request, Map {
-			"code": 404,
+		manager.printJSON(writer, request, Map{
+			"code":    404,
 			"message": "Not found",
-			"data": Map {
+			"data": Map{
 				"count": count,
-				"keys": keys,
+				"keys":  keys,
 			},
 		})
 	} else {
-		manager.printJSON(writer, request, Map {
-			"code": 200,
+		manager.printJSON(writer, request, Map{
+			"code":    200,
 			"message": "Success",
-			"data": Map {
+			"data": Map{
 				"count": count,
-				"keys": keys,
+				"keys":  keys,
 			},
 		})
 	}
@@ -594,8 +593,8 @@ func (manager *AdminManager)handleCacheTagInfo(writer http.ResponseWriter, reque
 
 // /@git/pull
 // 处理Git Pull命令
-func (manager *AdminManager)handleGitPull(writer http.ResponseWriter, request *http.Request) {
-	cmd := exec.Command("sh", "-c", "cd " + appManager.AppDir + ";git pull;touch /tmp/tmp-go-file")
+func (manager *AdminManager) handleGitPull(writer http.ResponseWriter, request *http.Request) {
+	cmd := exec.Command("sh", "-c", "cd "+appManager.AppDir+";git pull;touch /tmp/tmp-go-file")
 
 	stdout, stdoutErr := cmd.StdoutPipe()
 	if stdoutErr != nil {
@@ -625,16 +624,16 @@ func (manager *AdminManager)handleGitPull(writer http.ResponseWriter, request *h
 	//刷新数据
 	go appManager.reload()
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": output,
-		"data": nil,
+		"data":    nil,
 	})
 }
 
 // /@monitor
 // 监控信息
-func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *http.Request) {
+func (manager *AdminManager) handleMonitor(writer http.ResponseWriter, request *http.Request) {
 	//内存信息
 	memoryStat := runtime.MemStats{}
 	runtime.ReadMemStats(&memoryStat)
@@ -643,7 +642,7 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 	load1 := "0"
 	load2 := "0"
 	load3 := "0"
-	func () {
+	func() {
 		cmd := exec.Command("uptime")
 		reader, readerErr := cmd.StdoutPipe()
 		if readerErr != nil {
@@ -680,23 +679,23 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 
 	stat, _ := statManager.findStat()
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": Map {
-			"memory": memoryStat.Sys,
-			"memoryFormatted": fmt.Sprintf("%.2fm", float64(memoryStat.Sys) / 1024 / 1024),
-			"heap": memoryStat.HeapSys,
-			"heapFormatted": fmt.Sprintf("%.2fm", float64(memoryStat.HeapSys) / 1024 / 1024),
-			"heapObjects": memoryStat.HeapObjects,
-			"routines": runtime.NumGoroutine(),
-			"load1m": load1,
-			"load5m": load2,
-			"load15m": load3,
-			"requestsPerMin": stat["requests"],
-			"hitsPercent": stat["hits"],
-			"errorsPercent": stat["errors"],
-			"cost": stat["ms"],
+		"data": Map{
+			"memory":          memoryStat.Sys,
+			"memoryFormatted": fmt.Sprintf("%.2fm", float64(memoryStat.Sys)/1024/1024),
+			"heap":            memoryStat.HeapSys,
+			"heapFormatted":   fmt.Sprintf("%.2fm", float64(memoryStat.HeapSys)/1024/1024),
+			"heapObjects":     memoryStat.HeapObjects,
+			"routines":        runtime.NumGoroutine(),
+			"load1m":          load1,
+			"load5m":          load2,
+			"load15m":         load3,
+			"requestsPerMin":  stat["requests"],
+			"hitsPercent":     stat["hits"],
+			"errorsPercent":   stat["errors"],
+			"cost":            stat["ms"],
 		},
 	})
 }
@@ -704,10 +703,10 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 // /@api/stat
 // 总体统计
 func (manager *AdminManager) handleStat(writer http.ResponseWriter, request *http.Request) {
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": statManager.findGlobalStat(),
+		"data":    statManager.findGlobalStat(),
 	})
 }
 
@@ -719,13 +718,12 @@ func (manager *AdminManager) handleStatRequestsRank(writer http.ResponseWriter, 
 		manager.writeErrorMessage(writer, request, err)
 		return
 	}
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": apis,
+		"data":    apis,
 	})
 }
-
 
 // /@api/stat/hits/rank
 // 缓存命中数排行
@@ -735,13 +733,12 @@ func (manager *AdminManager) handleStatHitsRank(writer http.ResponseWriter, requ
 		manager.writeErrorMessage(writer, request, err)
 		return
 	}
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": apis,
+		"data":    apis,
 	})
 }
-
 
 // /@api/stat/errors/rank
 // 错误数排行
@@ -751,10 +748,10 @@ func (manager *AdminManager) handleStatErrorsRank(writer http.ResponseWriter, re
 		manager.writeErrorMessage(writer, request, err)
 		return
 	}
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": apis,
+		"data":    apis,
 	})
 }
 
@@ -766,40 +763,40 @@ func (manager *AdminManager) handleStatCostRank(writer http.ResponseWriter, requ
 		manager.writeErrorMessage(writer, request, err)
 		return
 	}
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": apis,
+		"data":    apis,
 	})
 }
 
 // /@api/watch
 // 监控日志
-func (manager *AdminManager)handleWatch(writer http.ResponseWriter, request *http.Request)  {
+func (manager *AdminManager) handleWatch(writer http.ResponseWriter, request *http.Request) {
 	appManager.setWatching(true)
 
 	//读取日志
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": statManager.watchLogs(),
+		"data":    statManager.watchLogs(),
 	})
 }
 
 // /@api/watch/clear
 // 清除监控日志
-func (manager *AdminManager)handleWatchClear(writer http.ResponseWriter, request *http.Request)  {
+func (manager *AdminManager) handleWatchClear(writer http.ResponseWriter, request *http.Request) {
 	statManager.clearWatchLogs()
 
-	manager.printJSON(writer, request, Map {
-		"code": 200,
+	manager.printJSON(writer, request, Map{
+		"code":    200,
 		"message": "Success",
-		"data": nil,
+		"data":    nil,
 	})
 }
 
 // 校验请求
-func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request *http.Request) bool {
+func (manager *AdminManager) validateRequest(writer http.ResponseWriter, request *http.Request) bool {
 	if !adminConfig.hasAllow && !adminConfig.hasDeny {
 		return true
 	}
@@ -809,16 +806,16 @@ func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request 
 
 	//本地的
 	if adminConfig.Host == "0.0.0.0" && ip == "[::1]" {
-		return  true
+		return true
 	}
 
 	//禁止的
 	if adminConfig.hasDeny {
 		if containsString(adminConfig.Deny.Clients, ip) {
-			manager.printJSON(writer, request, Map {
-				"code": 403,
+			manager.printJSON(writer, request, Map{
+				"code":    403,
 				"message": "Forbidden",
-				"data": nil,
+				"data":    nil,
 			})
 
 			return false
@@ -828,10 +825,10 @@ func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request 
 	//支持的
 	if adminConfig.hasAllow {
 		if !containsString(adminConfig.Allow.Clients, ip) {
-			manager.printJSON(writer, request, Map {
-				"code": 403,
+			manager.printJSON(writer, request, Map{
+				"code":    403,
 				"message": "Forbidden",
-				"data": nil,
+				"data":    nil,
 			})
 
 			return false
@@ -842,16 +839,16 @@ func (manager *AdminManager)validateRequest(writer http.ResponseWriter, request 
 }
 
 // 写入错误信息
-func (manager *AdminManager)writeErrorMessage(writer http.ResponseWriter, request *http.Request, err error) {
-	manager.printJSON(writer, request, Map {
-		"code": 500,
+func (manager *AdminManager) writeErrorMessage(writer http.ResponseWriter, request *http.Request, err error) {
+	manager.printJSON(writer, request, Map{
+		"code":    500,
 		"message": err.Error(),
-		"data": nil,
+		"data":    nil,
 	})
 }
 
 // 打印JSON信息
-func (manager *AdminManager)printJSON(writer http.ResponseWriter, request *http.Request, data Map) {
+func (manager *AdminManager) printJSON(writer http.ResponseWriter, request *http.Request, data Map) {
 	request.ParseForm()
 	pretty := request.Form.Get("_pretty")
 	editor := request.Form.Get("_editor")

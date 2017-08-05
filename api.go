@@ -15,41 +15,41 @@ type Api struct {
 	IsEnabled bool `json:"isEnabled"`
 
 	Pattern string `json:"pattern"`
-	Path string `json:"path"`
+	Path    string `json:"path"`
 	Address string `json:"address"`
 	Methods []string `json:"methods"`
 
 	IsAsynchronous bool
-	Response struct{
+	Response struct {
 		String string `json:"string"`
 		Binary string `json:"binary"`
-		XML string `json:"xml"`
-		JSON interface{} `json:"json"`
+		XML    string `json:"xml"`
+		JSON   interface{} `json:"json"`
 	}
 
 	Headers []struct {
-		Name string `json:"name"`
+		Name  string `json:"name"`
 		Value string `json:"value"`
 	} `json:"headers"`
 
 	Timeout string `json:"timeout"`
 	MaxSize string `json:"maxSize"`
 
-	Name string `json:"name"`
-	Description string `json:"description"`
-	Params []ApiParam `json:"params"`
-	Dones []string `json:"dones"`
-	Todos []string `json:"todos"`
+	Name         string `json:"name"`
+	Description  string `json:"description"`
+	Params       []ApiParam `json:"params"`
+	Dones        []string `json:"dones"`
+	Todos        []string `json:"todos"`
 	IsDeprecated bool `json:"isDeprecated"`
-	Version string `json:"version"`
+	Version      string `json:"version"`
 
-	Roles []string `json:"roles"`
-	Author string `json:"author"`
+	Roles   []string `json:"roles"`
+	Author  string `json:"author"`
 	Company string `json:"company"`
 
 	Addresses []ApiAddress `json:"availableAddresses"`
-	File string `json:"file"`
-	Mock string `json:"mock"`
+	File      string `json:"file"`
+	Mock      string `json:"mock"`
 
 	Stat ApiStat `json:"stat"`
 
@@ -57,12 +57,12 @@ type Api struct {
 	countAddresses int
 
 	patternRegexp regexp.Regexp
-	patternNames []string
+	patternNames  []string
 
-	responseString string
+	responseString    string
 	hasResponseString bool
-	timeoutDuration time.Duration
-	maxSizeBits float64
+	timeoutDuration   time.Duration
+	maxSizeBits       float64
 }
 
 // 分析API
@@ -81,7 +81,7 @@ func (api *Api) parse() {
 
 		pattern := api.Pattern
 		matches := reg.FindAllStringSubmatch(pattern, 10)
-		names := []string {}
+		names := []string{}
 		for _, match := range matches {
 			names = append(names, match[1])
 			if len(match[3]) > 0 {
@@ -127,7 +127,7 @@ func (api *Api) parse() {
 	// 最大请求尺寸
 	size, err := parseSizeFromString(api.MaxSize)
 	if err != nil {
-		log.Println("Parse " + api.MaxSize + " Error:", err.Error())
+		log.Println("Parse "+api.MaxSize+" Error:", err.Error())
 	} else {
 		api.maxSizeBits = size
 	}

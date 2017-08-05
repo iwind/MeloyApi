@@ -2,10 +2,10 @@ package MeloyApi
 
 import "regexp"
 
-var reuseRegexpMap = map[string] *regexp.Regexp {}
+var reuseRegexpMap = map[string]*regexp.Regexp{}
 
 // 生成可重用的正则
-func ReuseRegexpCompile(pattern string) (*regexp.Regexp, error)  {
+func ReuseRegexpCompile(pattern string) (*regexp.Regexp, error) {
 	reg, ok := reuseRegexpMap[pattern]
 	if ok {
 		return reg, nil

@@ -19,7 +19,7 @@ import (
 )
 
 type StatManager struct {
-	Data map[string] StatData
+	Data      map[string]StatData
 	DebugLogs []DebugLog
 
 	db *sql.DB
@@ -27,74 +27,73 @@ type StatManager struct {
 
 type StatData struct {
 	Server string
-	Host string
-	Path string
+	Host   string
+	Path   string
 
-	TotalMs int64
+	TotalMs  int64
 	Requests int64
-	Errors int64
-	Hits int64
+	Errors   int64
+	Hits     int64
 }
 
 type DebugLog struct {
 	Server string `json:"server"`
-	Host string `json:"host"`
-	Path string `json:"path"`
-	URI string `json:"uri"`
+	Host   string `json:"host"`
+	Path   string `json:"path"`
+	URI    string `json:"uri"`
 
-	Log string `json:"body"`
+	Log       string `json:"body"`
 	CreatedAt int64 `json:"createdAt"`
 }
 
 type ApiMinuteStat struct {
-	Hour int `json:"hour"`
-	Minute int `json:"minute"`
+	Hour     int `json:"hour"`
+	Minute   int `json:"minute"`
 	Requests int `json:"requests"`
-	Errors int `json:"errors"`
-	Hits int `json:"hits"`
-	AvgMs int `json:"avgMs"`
+	Errors   int `json:"errors"`
+	Hits     int `json:"hits"`
+	AvgMs    int `json:"avgMs"`
 }
 
 type ApiStat struct {
-	AvgMs int `json:"avgMs"`
+	AvgMs    int `json:"avgMs"`
 	Requests int `json:"requests"`
-	Hits int `json:"hits"`
-	Errors int `json:"errors"`
+	Hits     int `json:"hits"`
+	Errors   int `json:"errors"`
 }
 
-
 type ApiWatchLog struct {
-	ID int64 `json:"id"`
+	ID        int64 `json:"id"`
 	CreatedAt int64 `json:"createdAt"`
 
 	Request struct {
-		URI string `json:"uri"`
+		URI    string `json:"uri"`
 		Method string `json:"method"`
-		Data string `json:"data"`
+		Data   string `json:"data"`
 	} `json:"request"`
 
 	Response struct {
 		StatusCode int `json:"statusCode"`
-		Status string `json:"status"`
-		Data string `json:"data"`
+		Status     string `json:"status"`
+		Data       string `json:"data"`
 	} `json:"response"`
 }
 
 var lastTableDay string = ""
 var statMu sync.Mutex
-var statWatchLogs = []ApiWatchLog {}
+var statWatchLogs = []ApiWatchLog{}
 
 const STAT_WATCH_LOG_SIZE = 50
 
 // 初始化
 func (manager *StatManager) init(appDir string) {
-	manager.Data = map[string] StatData {}
+	manager.Data = map[string]StatData{}
 	manager.DebugLogs = []DebugLog{}
 
 	//启动数据库
-	db, err := sql.Open("sqlite3", appDir + "/data/stat.db")
+	db, err := sql.Open("sqlite3", appDir+"/data/stat.db")
 	if err != nil {
-		log.Fatal("Can not open database at '" + appDir + "/data/stat.db" + "':", err.Error())
+		log.Fatal("Can not open database at '"+appDir+"/data/stat.db"+"':", err.Error())
 	}
 	manager.db = db
 
@@ -105,7 +104,7 @@ func (manager *StatManager) init(appDir string) {
 	go func() {
 		tick := time.Tick(1 * time.Minute)
 		for {
-			<- tick
+			<-tick
 
 			if manager.prepareDailyTable() {
 				manager.dump()
@@ -189,7 +188,7 @@ func (manager *StatManager) send(address ApiAddress, path string, uri string, ti
 	key := address.Server + "$$" + address.Host + "$$" + path
 	value, ok := manager.Data[key]
 	if !ok {
-		value = StatData {
+		value = StatData{
 			address.Server,
 			address.Host,
 			path,
@@ -205,18 +204,17 @@ func (manager *StatManager) send(address ApiAddress, path string, uri string, ti
 		value.Hits += hits
 	}
 
-
 	manager.Data[key] = value
 	statMu.Unlock()
 
 	if appManager.IsDebug {
-		_bytes, err := json.MarshalIndent(Map {
-			"Api": path,
-			"Address": address.URL,
-			"URI": uri,
-			"TimeMs": timeMs,
+		_bytes, err := json.MarshalIndent(Map{
+			"Api":       path,
+			"Address":   address.URL,
+			"URI":       uri,
+			"TimeMs":    timeMs,
 			"HasErrors": errors > 0,
-			"HitCache": hits > 0,
+			"HitCache":  hits > 0,
 		}, "", "    ")
 		if err != nil {
 			log.Println(err)
@@ -238,11 +236,11 @@ func (manager *StatManager) sendDebug(address ApiAddress, path string, uri strin
 	})
 
 	if appManager.IsDebug {
-		_bytes, err := json.MarshalIndent(Map {
-			"Api": path,
+		_bytes, err := json.MarshalIndent(Map{
+			"Api":     path,
 			"Address": address.URL,
-			"URI": uri,
-			"Log": _log,
+			"URI":     uri,
+			"Log":     _log,
 		}, "", "    ")
 		if err != nil {
 			log.Println(err)
@@ -258,7 +256,7 @@ func (manager *StatManager) sendRequest(response *http.Response, request *http.R
 
 	t := time.Now()
 	watchLog := ApiWatchLog{
-		ID: t.UnixNano(),
+		ID:        t.UnixNano(),
 		CreatedAt: t.Unix(),
 	}
 	watchLog.Request.Method = request.Method
@@ -269,12 +267,11 @@ func (manager *StatManager) sendRequest(response *http.Response, request *http.R
 
 	if request.ContentLength > 65535 {
 		requestBytes, _ := httputil.DumpRequest(request, false)
-		watchLog.Request.Data = string(requestBytes) + "[Request body too long to print, size:" + strconv.FormatInt(request.ContentLength, 10)  + " bytes]"
+		watchLog.Request.Data = string(requestBytes) + "[Request body too long to print, size:" + strconv.FormatInt(request.ContentLength, 10) + " bytes]"
 	} else {
 		requestBytes, _ := httputil.DumpRequest(request, true)
 		watchLog.Request.Data = string(requestBytes)
 	}
-
 
 	responseBytes, err := httputil.DumpResponse(response, false)
 	if err == nil {
@@ -301,17 +298,17 @@ func (manager *StatManager) sendRequest(response *http.Response, request *http.R
 
 	_bytes, _ := ioutil.ReadAll(reader)
 	if len(_bytes) > 65535 {
-		watchLog.Response.Data += "[response body too long to print, size:" + strconv.Itoa(len(_bytes))  + " bytes]"
+		watchLog.Response.Data += "[response body too long to print, size:" + strconv.Itoa(len(_bytes)) + " bytes]"
 	} else {
-		watchLog.Response.Data +=  string(_bytes)
+		watchLog.Response.Data += string(_bytes)
 	}
 
 	response.Body = bodyCopy
 
 	statMu.Lock()
 	countLogs := len(statWatchLogs)
-	if countLogs > STAT_WATCH_LOG_SIZE - 1 {
-		statWatchLogs = statWatchLogs[countLogs - STAT_WATCH_LOG_SIZE + 1:]
+	if countLogs > STAT_WATCH_LOG_SIZE-1 {
+		statWatchLogs = statWatchLogs[countLogs-STAT_WATCH_LOG_SIZE+1:]
 	}
 	statWatchLogs = append(statWatchLogs, watchLog)
 	statMu.Unlock()
@@ -338,7 +335,7 @@ func (manager *StatManager) dump() {
 	data := manager.Data
 
 	//清空
-	manager.Data = map [string] StatData {}
+	manager.Data = map[string]StatData{}
 
 	//导数据
 	stmt, err := manager.db.Prepare("INSERT INTO stat_" + lastTableDay + " (server,host,path,ms, year,month,day,hour, minute,requests,errors,hits) VALUES (?,?,?,?, ?,?,?,?, ?,?,?,?)")
@@ -352,7 +349,7 @@ func (manager *StatManager) dump() {
 	//当日统计
 	now := time.Now()
 	for _, statData := range data {
-		_, err := stmt.Exec(statData.Server, statData.Host, statData.Path, statData.TotalMs / statData.Requests, now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), statData.Requests, statData.Errors, statData.Hits)
+		_, err := stmt.Exec(statData.Server, statData.Host, statData.Path, statData.TotalMs/statData.Requests, now.Year(), int(now.Month()), now.Day(), now.Hour(), now.Minute(), statData.Requests, statData.Errors, statData.Hits)
 		if err != nil {
 			log.Println("Error:" + err.Error())
 			continue
@@ -400,7 +397,7 @@ func (manager *StatManager) updateGlobalStat(data map[string]StatData) {
 }
 
 // 取得当天的总统计
-func (manager *StatManager) avgStat(path string) ApiStat  {
+func (manager *StatManager) avgStat(path string) ApiStat {
 	now := time.Now()
 	return manager.findAvgStatForDay(path, now.Year(), int(now.Month()), now.Day())
 }
@@ -411,7 +408,7 @@ func (manager *StatManager) findAvgStatForDay(path string, year int, month int, 
 	stmt, err := manager.db.Prepare("SELECT SUM(ms),SUM(requests),SUM(hits),SUM(errors) FROM stat_" + date + " WHERE path=?")
 	if err != nil {
 		log.Println("Error:" + err.Error())
-		return ApiStat{ AvgMs: 0, Requests: 0, Hits: 0, Errors: 0 }
+		return ApiStat{AvgMs: 0, Requests: 0, Hits: 0, Errors: 0}
 	}
 
 	defer stmt.Close()
@@ -425,14 +422,14 @@ func (manager *StatManager) findAvgStatForDay(path string, year int, month int, 
 
 	if err != nil {
 		//log.Println("Error:" + err.Error())
-		return ApiStat{ AvgMs: 0, Requests: 0, Hits: 0, Errors: 0 }
+		return ApiStat{AvgMs: 0, Requests: 0, Hits: 0, Errors: 0}
 	}
 
-	return ApiStat {
-		AvgMs: totalMs / requests,
+	return ApiStat{
+		AvgMs:    totalMs / requests,
 		Requests: requests,
-		Hits: hits,
-		Errors: errors,
+		Hits:     hits,
+		Errors:   errors,
 	}
 }
 
@@ -468,12 +465,12 @@ func (manager *StatManager) findMinuteStatForDay(path string, year int, month in
 		rows.Scan(&ms, &requests, &errors, &hits, &hour, &minute)
 
 		stats = append(stats, ApiMinuteStat{
-			Hour: hour,
-			Minute: minute,
-			AvgMs:ms,
-			Requests:requests,
-			Errors: errors,
-			Hits:hits,
+			Hour:     hour,
+			Minute:   minute,
+			AvgMs:    ms,
+			Requests: requests,
+			Errors:   errors,
+			Hits:     hits,
 		})
 	}
 
@@ -511,7 +508,7 @@ func (manager *StatManager) findDebugLogsForPath(path string) (logs []DebugLog) 
 
 		rows.Scan(&server, &host, &path, &uri, &body, &createdAt)
 
-		logs = append(logs, DebugLog {
+		logs = append(logs, DebugLog{
 			server,
 			host,
 			path,
@@ -580,8 +577,8 @@ func (manager *StatManager) findRequestsRank(size int) (apis []Map, err error) {
 
 		rows.Scan(&path, &sum)
 
-		apis = append(apis, Map {
-			"path": path,
+		apis = append(apis, Map{
+			"path":  path,
 			"count": sum,
 		})
 	}
@@ -616,8 +613,8 @@ func (manager *StatManager) findHitsRank(size int) (apis []Map, err error) {
 			continue
 		}
 
-		apis = append(apis, Map {
-			"path": path,
+		apis = append(apis, Map{
+			"path":    path,
 			"percent": sum,
 		})
 	}
@@ -651,8 +648,8 @@ func (manager *StatManager) findErrorsRank(size int) (apis []Map, err error) {
 			continue
 		}
 
-		apis = append(apis, Map {
-			"path": path,
+		apis = append(apis, Map{
+			"path":    path,
 			"percent": sum,
 		})
 	}
@@ -686,9 +683,9 @@ func (manager *StatManager) findCostRank(size int) (apis []Map, err error) {
 			continue
 		}
 
-		apis = append(apis, Map {
+		apis = append(apis, Map{
 			"path": path,
-			"ms": int(sum),
+			"ms":   int(sum),
 		})
 	}
 
@@ -696,11 +693,11 @@ func (manager *StatManager) findCostRank(size int) (apis []Map, err error) {
 }
 
 // 整体请求频率、命中率、错误率
-func (manager *StatManager) findStat()(result Map, err error) {
+func (manager *StatManager) findStat() (result Map, err error) {
 	result = Map{
 		"requests": 0,
-		"hits": 0,
-		"errors": 0,
+		"hits":     0,
+		"errors":   0,
 	}
 	stmt, err := manager.db.Prepare("SELECT AVG(requests) as requests, SUM(hits) * 100/SUM(requests) AS hits, SUM(errors) * 100/SUM(requests) AS errors, AVG(ms) AS ms FROM stat_" + lastTableDay)
 	if err != nil {
@@ -723,21 +720,21 @@ func (manager *StatManager) findStat()(result Map, err error) {
 
 	result = Map{
 		"requests": int(requests),
-		"hits": hits,
-		"errors": errors,
-		"ms": int(ms),
+		"hits":     hits,
+		"errors":   errors,
+		"ms":       int(ms),
 	}
 	return
 }
 
 // 全部的请求数、命中数、错误数
 func (manager *StatManager) findGlobalStat() (result Map) {
-	result = Map {
+	result = Map{
 		"requests": 0,
-		"hits": 0,
-		"errors": 0,
+		"hits":     0,
+		"errors":   0,
 		"dateFrom": "",
-		"apis": 0,
+		"apis":     0,
 	}
 	row := manager.db.QueryRow("SELECT requests, hits, errors, created_at FROM stat_global LIMIT 1")
 	var requests int
@@ -765,10 +762,10 @@ func (manager *StatManager) findGlobalStat() (result Map) {
 
 // 读取监控日志
 func (manager *StatManager) watchLogs() []ApiWatchLog {
-	var logs = []ApiWatchLog {}
+	var logs = []ApiWatchLog{}
 
 	var count = len(statWatchLogs)
-	for i := count - 1; i >= 0 ; i -- {
+	for i := count - 1; i >= 0; i -- {
 		logs = append(logs, statWatchLogs[i])
 	}
 
@@ -781,6 +778,6 @@ func (manager *StatManager) clearWatchLogs() {
 }
 
 // 关闭统计管理器
-func (manager *StatManager) closeDb()  {
+func (manager *StatManager) closeDb() {
 	manager.db.Close()
 }

@@ -9,22 +9,22 @@ type HookManager struct {
 }
 
 type Hook struct {
-	BeforeFunc func (context *HookContext, next func())
-	AfterFunc func (context *HookContext)
+	BeforeFunc func(context *HookContext, next func())
+	AfterFunc  func(context *HookContext)
 
 	IsAvailable bool
 }
 
 type HookContext struct {
-	Writer http.ResponseWriter
-	Request *http.Request
-	Api *Api
+	Writer   http.ResponseWriter
+	Request  *http.Request
+	Api      *Api
 	Response *http.Response
-	Error error
+	Error    error
 }
 
 // 转发请求之前调用
-func (manager *HookManager) beforeHook(writer http.ResponseWriter, request *http.Request, api *Api, do func (context *HookContext)) {
+func (manager *HookManager) beforeHook(writer http.ResponseWriter, request *http.Request, api *Api, do func(context *HookContext)) {
 	canDo := true
 
 	context := &HookContext{}
@@ -40,7 +40,7 @@ func (manager *HookManager) beforeHook(writer http.ResponseWriter, request *http
 			}
 
 			canNext := false
-			hook.BeforeFunc(context, func () {
+			hook.BeforeFunc(context, func() {
 				canNext = true
 			})
 			manager.hooks[index].IsAvailable = true
@@ -77,6 +77,6 @@ func (manager *HookManager) afterHook(context *HookContext, response *http.Respo
 }
 
 // 添加新钩子
-func (manager *HookManager) AddHook(hook Hook)  {
+func (manager *HookManager) AddHook(hook Hook) {
 	manager.hooks = append(manager.hooks, hook)
 }
