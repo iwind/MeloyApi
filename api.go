@@ -33,6 +33,7 @@ type Api struct {
 	} `json:"headers"`
 
 	Timeout string `json:"timeout"`
+	MaxSize string `json:"maxSize"`
 
 	Name string `json:"name"`
 	Description string `json:"description"`
@@ -61,11 +62,12 @@ type Api struct {
 	responseString string
 	hasResponseString bool
 	timeoutDuration time.Duration
+	maxSizeBits float64
 }
 
 // 分析API
 func (api *Api) parse() {
-	//支持pattern，比如:name，:age，:subject(^[\\w-]+$)
+	// 支持pattern，比如:name，:age，:subject(^[\\w-]+$)
 	if len(api.Pattern) > 0 {
 		if len(api.Path) == 0 {
 			api.Path = api.Pattern
@@ -98,13 +100,16 @@ func (api *Api) parse() {
 		}
 	}
 
-	//校验和转换api.methods
+	// 校验和转换api.methods
 	for methodIndex, method := range api.Methods {
 		api.Methods[methodIndex] = strings.ToUpper(method)
 	}
 
-	//超时时间
-	//支持 100ms, 100s
+	// 超时时间
+	// 支持 100ms, 100s
+	// 具体见：time.ParseDuration() 方法说明
+	// such as "300ms", "-1.5h" or "2h45m".
+	// Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
 	if len(api.Timeout) > 0 {
 		reg, _ := regexp.Compile("^(\\d+(?:\\.\\d+)?)\\s*(ms|s)$")
 		matches := reg.FindStringSubmatch(api.Timeout)
@@ -119,7 +124,15 @@ func (api *Api) parse() {
 		}
 	}
 
-	//响应数据
+	// 最大请求尺寸
+	size, err := parseSizeFromString(api.MaxSize)
+	if err != nil {
+		log.Println("Parse " + api.MaxSize + " Error:", err.Error())
+	} else {
+		api.maxSizeBits = size
+	}
+
+	// 响应数据
 	if len(api.Response.String) > 0 {
 		api.responseString = api.Response.String
 		api.hasResponseString = true
@@ -177,4 +190,5 @@ func (api *Api) copyFrom(from Api) {
 	api.responseString = from.responseString
 	api.hasResponseString = from.hasResponseString
 	api.timeoutDuration = from.timeoutDuration
+	api.maxSizeBits = from.maxSizeBits
 }

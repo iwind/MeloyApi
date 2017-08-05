@@ -14,8 +14,9 @@ import (
 	"syscall"
 	"os/signal"
 	"net/url"
-	"bytes"
 	"sync"
+	"bytes"
+	"regexp"
 )
 
 const MELOY_API_VERSION = "1.0"
@@ -33,12 +34,24 @@ type Host struct {
 type Server struct {
 	Code string
 	Hosts []Host
+
+	Request struct {
+		Timeout string
+		MaxSize string
+
+		timeoutDuration time.Duration
+		maxSizeBits float64
+	}
 }
 
 // APP配置
 type AppConfig struct {
 	Host string
 	Port int
+	SSL struct {
+		Cert string
+		Key string
+	}
 
 	Allow struct {
 		Clients []string
@@ -120,7 +133,7 @@ var serverMuxLoaded = false
 func Start(appDir string) {
 	appManager.AppDir = appDir
 
-	//检查data/, logs/目录是否存在
+	// 检查data/, logs/目录是否存在
 	for _, dir := range []string { "data", "logs" } {
 		systemDir := appDir + string(os.PathSeparator) + dir
 		if exists, _ := FileExists(systemDir); !exists {
@@ -133,14 +146,14 @@ func Start(appDir string) {
 		return
 	}
 
-	//写入PID
+	// 写入PID
 	err := ioutil.WriteFile(appDir + "/data/pid", []byte(strconv.Itoa(os.Getpid())), 0644)
 	if err != nil {
 		log.Fatal(err)
 		return
 	}
 
-	//日志
+	// 日志
 	if len(os.Args) != 1 && !appManager.IsDebug {
 		logFile, err := os.OpenFile(appManager.AppDir + "/logs/meloy.log", os.O_APPEND | os.O_WRONLY | os.O_CREATE, os.ModeAppend)
 		if err != nil {
@@ -152,7 +165,7 @@ func Start(appDir string) {
 		log.SetOutput(logFile)
 	}
 
-	//重载信号
+	// 重载信号
 	signalsChannel := make(chan os.Signal, 1024)
 	signal.Notify(signalsChannel, syscall.SIGINT, syscall.SIGHUP)
 	go func() {
@@ -172,33 +185,48 @@ func Start(appDir string) {
 		}
 	}()
 
-	//初始化统计管理器
+	// 初始化统计管理器
 	statManager.init(appDir)
 
-	//加载应用配置
+	// 加载应用配置
 	appManager.loadAppConfig()
 
 	address := fmt.Sprintf("%s:%d", appConfig.Host, appConfig.Port)
 	log.Printf("start %s:%d\n", appConfig.Host, appConfig.Port)
 
-	//初始化Handler管理器
+	// 初始化Handler管理器
 	handlerManager.init()
 
-	//加载数据
+	// 加载数据
 	appManager.reload()
 
 	//启动Server
 	go func () {
-		http.ListenAndServe(address, serverMux)
+		err = nil
+		if len(appConfig.SSL.Key) == 0 || len(appConfig.SSL.Cert) == 0 {
+			err = http.ListenAndServe(address, serverMux)
+		} else {
+			err = http.ListenAndServeTLS(address, appConfig.SSL.Cert, appConfig.SSL.Key, serverMux)
+		}
+
+		// 处理错误
+		const escape = "\x1b"
+		if err != nil {
+			if appManager.IsDebug {
+				log.Fatal(fmt.Sprintf("%s[1;31mFailed to start app server, error:" + err.Error() + "%s[0m", escape, escape))
+			} else {
+				log.Fatal("Failed to start app server, error:" + err.Error())
+			}
+		}
 	}()
 
-	//启动Admin
+	// 启动Admin
 	adminManager.Load(appDir)
 
-	//启动缓存
+	// 启动缓存
 	cacheManager.init()
 
-	//等待请求
+	// 等待请求
 	appManager.wait()
 }
 
@@ -335,6 +363,9 @@ func (manager *AppManager) helpCommand()  {
   ./meloy-api reload
   	Reload api configurations
 
+  ./meloy-api create [API File Name]
+  	Create new api, such as: ./meloy-api create hello_world_test
+
   ./meloy-api version
   	Show api version
 
@@ -398,20 +429,29 @@ func (manager *AppManager) loadAppConfig() {
 		return
 	}
 
-	jsonError := json.Unmarshal(appBytes, &appConfig)
+	// 删除注释
+	jsonString := string(appBytes)
+	commentReg, err := ReuseRegexpCompile("/([*]+((.|\n|\r)+?)[*]+/)|(\n\\s+//.+)")
+	if err != nil {
+		log.Printf("Error:%s\n", err)
+	} else {
+		jsonString = commentReg.ReplaceAllString(jsonString, "")
+	}
+
+	jsonError := json.Unmarshal([]byte(jsonString), &appConfig)
 	if jsonError != nil {
 		log.Printf("Error:%s", jsonError)
 		return
 	}
 
-	//用户限制
+	// 用户限制
 	appConfig.hasUsers = len(appConfig.Users) > 0
 
-	//客户端限制
+	// 客户端限制
 	appConfig.hasAllow = len(appConfig.Allow.Clients) > 0
 	appConfig.hasDeny = len(appConfig.Deny.Clients) > 0
 
-	//请求限制
+	// 请求限制
 	appConfig.limitDayLeft = appConfig.Limits.Requests.Day
 	appConfig.limitMinuteLeft = appConfig.Limits.Requests.Minute
 	appConfig.hasDayLimit = appConfig.limitDayLeft > 0
@@ -420,7 +460,7 @@ func (manager *AppManager) loadAppConfig() {
 
 // 重新加载API配置
 func (manager *AppManager) reload() {
-	//应用配置
+	// 应用配置
 	manager.loadAppConfig()
 
 	//服务器配置
@@ -508,11 +548,49 @@ func (manager *AppManager) loadServers() (servers []Server) {
 		return
 	}
 
-	jsonErr := json.Unmarshal(serverBytes, &servers)
+	// 删除注释
+	jsonString := string(serverBytes)
+	commentReg, err := ReuseRegexpCompile("/([*]+((.|\n|\r)+?)[*]+/)|(\n\\s+//.+)")
+	if err != nil {
+		log.Printf("Error:%s\n", err)
+	} else {
+		jsonString = commentReg.ReplaceAllString(jsonString, "")
+	}
+
+	jsonErr := json.Unmarshal([]byte(jsonString), &servers)
 	if jsonErr != nil {
-		log.Printf("Error:%s\n", jsonErr)
+		log.Printf("Error:%s:\n~~~\n%s\n~~~\n", jsonErr, jsonString)
 		return
 	}
+
+	// 分析Servers
+	for index, server := range servers {
+		// 分析最大尺寸
+		if len(server.Request.MaxSize) > 0 {
+			size, err := parseSizeFromString(server.Request.MaxSize)
+			if err != nil {
+				log.Println("Parse " + server.Request.MaxSize + " Error:", err.Error())
+			} else {
+				servers[index].Request.maxSizeBits = size
+			}
+		}
+
+		// 分析超时时间
+		if len(server.Request.Timeout) > 0 {
+			reg, _ := regexp.Compile("^(\\d+(?:\\.\\d+)?)\\s*(ms|s)$")
+			matches := reg.FindStringSubmatch(server.Request.Timeout)
+			if len(matches) == 3 {
+				duration, err := time.ParseDuration(matches[1] + matches[2])
+				if err != nil {
+					log.Println("API timeout parse failed '" + server.Request.Timeout + "'")
+				}
+				servers[index].Request.timeoutDuration = duration
+			} else {
+				log.Println("API timeout parse failed '" + server.Request.Timeout + "'")
+			}
+		}
+	}
+
 	return
 }
 
@@ -563,8 +641,8 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 
 		jsonString := string(_bytes)
 
-		//删除注释
-		commentReg, err := ReuseRegexpCompile("/([*]+((.|\n|\r)+)[*]+/)|(\n\\s+//.+)")
+		// 删除注释
+		commentReg, err := ReuseRegexpCompile("/([*]+((.|\n|\r)+?)[*]+/)|(\n\\s+//.+)")
 		if err != nil {
 			continue
 		}
@@ -572,13 +650,13 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 
 		jsonError := json.Unmarshal([]byte(jsonString), &api)
 		if jsonError != nil {
-			log.Printf("Error:%s:%s\n", file.Name(), jsonError)
+			log.Printf("Error:%s:%s:\n~~~\n%s\n~~~\n", file.Name(), jsonError.Error(), jsonString)
 			continue
 		}
 		api.File = apiDir + string(os.PathSeparator) + file.Name()
 		api.parse()
 
-		//转换地址
+		// 转换地址
 		for _, server := range servers {
 			if len(server.Hosts) == 0 {
 				continue
@@ -592,12 +670,23 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 				totalWeight += host.Weight
 			}
 
-			//支持变量 %{server.服务器代号}, %{api.path}
+			// 支持变量 %{server.服务器代号}, %{api.path}
 			reg, _ := ReuseRegexpCompile("%{server." + server.Code + "}")
 			pathReg, _ := ReuseRegexpCompile("%\\{api.path}")
 
 			if !reg.MatchString(api.Address) {
 				continue
+			}
+
+			// 超时和最大请求尺寸设置
+			if api.maxSizeBits <= 0 && server.Request.maxSizeBits > 0 {
+				api.maxSizeBits = server.Request.maxSizeBits
+			}
+			if api.maxSizeBits <= 0 { // 如果没有设置，默认只支持32M
+				api.maxSizeBits = 32 << 20
+			}
+			if api.timeoutDuration <= 0 && server.Request.timeoutDuration > 0 {
+				api.timeoutDuration = server.Request.timeoutDuration
 			}
 
 			for _, host := range server.Hosts {
@@ -648,19 +737,19 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 
 // 处理请求
 func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Request, api *Api) {
-	//登录用户
+	// 登录用户
 	if !manager.validateUser(request) {
 		http.Error(writer, "Permission Denied", http.StatusForbidden)
 		return
 	}
 
-	//校验请求
+	// 校验请求
 	if !manager.validateRequest(request) {
 		http.Error(writer, "Permission Denied", http.StatusForbidden)
 		return
 	}
 
-	//处理限流
+	// 处理限流
 	if manager.reachLimit() {
 		http.Error(writer, "API requests limit reached", http.StatusForbidden)
 		return
@@ -671,7 +760,7 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 		return
 	}
 
-	//选取地址
+	// 选取地址
 	var address ApiAddress
 	if api.countAddresses > 1 {
 		rand.Seed(time.Now().UnixNano())
@@ -682,7 +771,7 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 	}
 
 
-	//检查method
+	// 检查method
 	method := strings.ToUpper(request.Method)
 	if !containsString(api.Methods, method) {
 		fmt.Fprintln(writer, "'" + request.Method + "' method is not supported")
@@ -695,7 +784,7 @@ func (manager *AppManager) handle(writer http.ResponseWriter, request *http.Requ
 			writer.Write([]byte(api.responseString))
 			go manager.handleMethod(writer, request, api, address, method, hookContext)
 		} else {
-			//开始处理
+			// 开始处理
 			manager.handleMethod(writer, request, api, address, method, hookContext)
 		}
 	})
@@ -706,6 +795,13 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	t := time.Now().UnixNano()
 
 	query := request.URL.RawQuery
+
+	//判断最大内容长度
+	if api.maxSizeBits > 0 && float64(request.ContentLength) > api.maxSizeBits {
+		request.ParseMultipartForm(2 << 10)
+		http.Error(writer, "request body too large to upload", http.StatusRequestEntityTooLarge)
+		return
+	}
 
 	//是否有缓存
 	cacheKey := request.URL.RequestURI()
@@ -752,7 +848,7 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	if api.timeoutDuration > 0 {
 		requestClient.Timeout = api.timeoutDuration
 	} else {
-		requestClient.Timeout = 30 * time.Second //@TODO 从server配置中读取
+		requestClient.Timeout = 30 * time.Second
 	}
 
 	//是否正在watch
@@ -767,18 +863,29 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 
 	var requestCopy *http.Request
 	if isWatching {
-		buf,err := ioutil.ReadAll(request.Body)
-		if err == nil {
-			requestBodyCopy := ioutil.NopCloser(bytes.NewBuffer(buf))
-			requestBodyCopy2 := ioutil.NopCloser(bytes.NewBuffer(buf))
-			requestCopy, _ = http.NewRequest(request.Method, request.RequestURI, requestBodyCopy)
+		if request.ContentLength > 65535 {
+			requestCopy, _ = http.NewRequest(request.Method, request.RequestURI, ioutil.NopCloser(bytes.NewReader([]byte{})))
+			requestCopy.ContentLength = request.ContentLength
 			requestCopy.RequestURI = request.RequestURI
 			requestCopy.Header = request.Header
-			newRequest.Body = requestBodyCopy2
+		} else {
+			buf, err := ioutil.ReadAll(request.Body)
 
-			defer requestBodyCopy.Close()
-			defer requestBodyCopy2.Close()
+			if err == nil {
+				requestBodyCopy := ioutil.NopCloser(bytes.NewBuffer(buf))
+				requestBodyCopy2 := ioutil.NopCloser(bytes.NewBuffer(buf))
+				requestCopy, _ = http.NewRequest(request.Method, request.RequestURI, requestBodyCopy)
+				requestCopy.ContentLength = request.ContentLength
+				requestCopy.RequestURI = request.RequestURI
+				requestCopy.Header = request.Header
+				newRequest.Body = requestBodyCopy2
+				defer requestBodyCopy.Close()
+				defer requestBodyCopy2.Close()
+			} else {
+				log.Println("Error:" + err.Error())
+			}
 		}
+
 	}
 
 	resp, err := requestClient.Do(newRequest)

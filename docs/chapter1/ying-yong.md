@@ -34,5 +34,53 @@ http://127.0.0.1:8000/users
 http://127.0.0.1:8000/gallery/photos
 ```
 
+## 限流
 
+可以在应用中使用`limits`配置接口每分钟请求数和每天的请求数：
+
+```json
+{
+ ...
+  "limits": {
+    "requests": {
+      "minute": 100,
+      "day": 100000
+    }
+  },
+  
+  ...
+}
+```
+
+其中`minute`为每分钟最大请求数，`day`为每天的最大请求数，两者可以都设置，也可以都不设置；如果设置为`0`，表示此项不限制。
+
+## 用户验证
+
+可以设置API请求时的用户：
+
+```json
+{
+  ...
+  
+  "users": [
+    {
+        "type": "account",
+        "username": "zhangsan",
+        "password": "123456"
+    },
+    ...
+  ],
+  
+  ...
+}
+```
+
+可以加入一组用户，用户类型目前只支持`account`一种，当设置了用户之后，用户要调用API，必须在请求的Header中加入：
+
+```
+Meloy-Username: zhangsan
+Meloy-Password: 123456
+```
+
+否则会提示`403`权限受限。
 

@@ -267,17 +267,12 @@ func (manager *StatManager) sendRequest(response *http.Response, request *http.R
 	watchLog.Response.StatusCode = response.StatusCode
 	watchLog.Response.Status = response.Status
 
-	requestBytes, err := httputil.DumpRequest(request, true)
-	if err == nil {
-		contentLength := len(requestBytes)
-		if contentLength > 65535 {
-			requestBytes, _ = httputil.DumpRequest(request, false)
-			watchLog.Request.Data = string(requestBytes) + "[Request body too long to print, size:" + strconv.Itoa(contentLength)  + " bytes]"
-		} else {
-			watchLog.Request.Data = string(requestBytes)
-		}
+	if request.ContentLength > 65535 {
+		requestBytes, _ := httputil.DumpRequest(request, false)
+		watchLog.Request.Data = string(requestBytes) + "[Request body too long to print, size:" + strconv.FormatInt(request.ContentLength, 10)  + " bytes]"
 	} else {
-		watchLog.Request.Data = ""
+		requestBytes, _ := httputil.DumpRequest(request, true)
+		watchLog.Request.Data = string(requestBytes)
 	}
 
 
@@ -772,20 +767,9 @@ func (manager *StatManager) findGlobalStat() (result Map) {
 func (manager *StatManager) watchLogs() []ApiWatchLog {
 	var logs = []ApiWatchLog {}
 
-	var j = 0
-	var max = STAT_WATCH_LOG_SIZE
 	var count = len(statWatchLogs)
 	for i := count - 1; i >= 0 ; i -- {
 		logs = append(logs, statWatchLogs[i])
-		j ++
-
-		if j >= max {
-			break
-		}
-	}
-
-	if count > max {
-		statWatchLogs = statWatchLogs[(count - max):]
 	}
 
 	return logs

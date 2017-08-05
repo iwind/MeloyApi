@@ -22,6 +22,11 @@ type AdminManager struct {
 type AdminConfig struct {
 	Host string
 	Port int
+	SSL struct {
+		Cert string
+		Key string
+	}
+
 	Allow struct {
 		Clients []string
 	}
@@ -44,7 +49,16 @@ func (manager *AdminManager)Load(appDir string)  {
 		return
 	}
 
-	err = json.Unmarshal(bytes, &adminConfig)
+	// 删除注释
+	jsonString := string(bytes)
+	commentReg, err := ReuseRegexpCompile("/([*]+((.|\n|\r)+?)[*]+/)|(\n\\s+//.+)")
+	if err != nil {
+		log.Printf("Error:%s\n", err)
+	} else {
+		jsonString = commentReg.ReplaceAllString(jsonString, "")
+	}
+
+	err = json.Unmarshal([]byte(jsonString), &adminConfig)
 	if err != nil {
 		log.Println("Error:" + err.Error())
 		return
@@ -64,7 +78,22 @@ func (manager *AdminManager)Load(appDir string)  {
 		serverMux.Handle("/web/", http.StripPrefix("/web/",
 				http.FileServer(http.Dir(appDir + string(os.PathSeparator) + "web" + string(os.PathSeparator)))))
 
-		http.ListenAndServe(address, serverMux)
+		err = nil
+		if len(adminConfig.SSL.Key) == 0 || len(adminConfig.SSL.Cert) == 0 {
+			err = http.ListenAndServe(address, serverMux)
+		} else {
+			err = http.ListenAndServeTLS(address, adminConfig.SSL.Cert, adminConfig.SSL.Key, serverMux)
+		}
+
+		// 处理错误
+		const escape = "\x1b"
+		if err != nil {
+			if appManager.IsDebug {
+				log.Fatal(fmt.Sprintf("%s[1;31mFailed to start admin server, error:" + err.Error() + "%s[0m", escape, escape))
+			} else {
+				log.Fatal("Failed to start admin server, error:" + err.Error())
+			}
+		}
 	}()
 }
 
@@ -656,8 +685,10 @@ func (manager *AdminManager)handleMonitor(writer http.ResponseWriter, request *h
 		"message": "Success",
 		"data": Map {
 			"memory": memoryStat.Sys,
+			"memoryFormatted": fmt.Sprintf("%.2fm", float64(memoryStat.Sys) / 1024 / 1024),
 			"heap": memoryStat.HeapSys,
-			"heapObject": memoryStat.HeapObjects,
+			"heapFormatted": fmt.Sprintf("%.2fm", float64(memoryStat.HeapSys) / 1024 / 1024),
+			"heapObjects": memoryStat.HeapObjects,
 			"routines": runtime.NumGoroutine(),
 			"load1m": load1,
 			"load5m": load2,
