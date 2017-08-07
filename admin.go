@@ -1,18 +1,18 @@
 package MeloyApi
 
 import (
-	"net/http"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
-	"fmt"
-	"regexp"
-	"strconv"
-	"os/exec"
+	"net/http"
 	"os"
-	"time"
+	"os/exec"
+	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type AdminManager struct {
@@ -21,7 +21,7 @@ type AdminManager struct {
 type AdminConfig struct {
 	Host string
 	Port int
-	SSL struct {
+	SSL  struct {
 		Cert string
 		Key  string
 	}
@@ -345,7 +345,7 @@ func (manager *AdminManager) handleApi(writer http.ResponseWriter, request *http
 		manager.printJSON(writer, request, Map{
 			"code":    404,
 			"message": "Not Found",
-			"data":    Api{},
+			"data":    nil,
 		})
 	} else {
 		manager.printJSON(writer, request, Map{

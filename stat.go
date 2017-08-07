@@ -1,21 +1,21 @@
 package MeloyApi
 
 import (
+	"bytes"
+	"compress/gzip"
 	"database/sql"
-	_ "github.com/mattn/go-sqlite3"
-	"log"
-	"time"
-	"strings"
-	"fmt"
-	"sync"
 	"encoding/json"
-	"strconv"
+	"fmt"
+	_ "github.com/mattn/go-sqlite3"
+	"io"
+	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httputil"
-	"io"
-	"bytes"
-	"io/ioutil"
-	"compress/gzip"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 )
 
 type StatManager struct {
@@ -43,7 +43,7 @@ type DebugLog struct {
 	URI    string `json:"uri"`
 
 	Log       string `json:"body"`
-	CreatedAt int64 `json:"createdAt"`
+	CreatedAt int64  `json:"createdAt"`
 }
 
 type ApiMinuteStat struct {
@@ -73,7 +73,7 @@ type ApiWatchLog struct {
 	} `json:"request"`
 
 	Response struct {
-		StatusCode int `json:"statusCode"`
+		StatusCode int    `json:"statusCode"`
 		Status     string `json:"status"`
 		Data       string `json:"data"`
 	} `json:"response"`
@@ -698,6 +698,7 @@ func (manager *StatManager) findStat() (result Map, err error) {
 		"requests": 0,
 		"hits":     0,
 		"errors":   0,
+		"ms":       0,
 	}
 	stmt, err := manager.db.Prepare("SELECT AVG(requests) as requests, SUM(hits) * 100/SUM(requests) AS hits, SUM(errors) * 100/SUM(requests) AS errors, AVG(ms) AS ms FROM stat_" + lastTableDay)
 	if err != nil {
@@ -714,7 +715,7 @@ func (manager *StatManager) findStat() (result Map, err error) {
 	var ms float32
 	err = row.Scan(&requests, &hits, &errors, &ms)
 	if err != nil {
-		log.Println("Error:" + err.Error())
+		//log.Println("Error:" + err.Error())
 		return
 	}
 
@@ -743,7 +744,7 @@ func (manager *StatManager) findGlobalStat() (result Map) {
 	var createdAt int
 	err := row.Scan(&requests, &hits, &errors, &createdAt)
 	if err != nil {
-		log.Println(err)
+		//log.Println(err)
 		requests = 0
 		hits = 0
 		errors = 0
@@ -765,7 +766,7 @@ func (manager *StatManager) watchLogs() []ApiWatchLog {
 	var logs = []ApiWatchLog{}
 
 	var count = len(statWatchLogs)
-	for i := count - 1; i >= 0; i -- {
+	for i := count - 1; i >= 0; i-- {
 		logs = append(logs, statWatchLogs[i])
 	}
 

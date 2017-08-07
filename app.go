@@ -1,22 +1,22 @@
 package MeloyApi
 
 import (
-	"net/http"
-	"io/ioutil"
-	"encoding/json"
-	"time"
-	"strings"
-	"math/rand"
-	"log"
-	"fmt"
-	"strconv"
-	"os"
-	"syscall"
-	"os/signal"
-	"net/url"
-	"sync"
 	"bytes"
+	"encoding/json"
+	"fmt"
+	"io/ioutil"
+	"log"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
 	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
 )
 
 const MELOY_API_VERSION = "1.0"
@@ -74,15 +74,18 @@ type AppConfig struct {
 		Password string
 	}
 
-	//是否有限制
+	// 插件
+	Plugins []string
+
+	// 是否有限制
 	hasAllow bool
 	hasDeny  bool
 
-	//监听
+	// 监听
 	isWatching bool
 	watchingAt int64
 
-	//限流
+	// 限流
 	hasMinuteLimit bool
 	hasDayLimit    bool
 
@@ -92,25 +95,21 @@ type AppConfig struct {
 	limitMinuteLeft int
 	limitDayLeft    int
 
-	//用户限制
+	// 用户限制
 	hasUsers bool
 }
 
+// API配置
 type ApiConfig struct {
 	cacheTags   []string
 	cacheLifeMs int64
 }
 
+// API地址
 type ApiAddress struct {
 	Server string
 	Host   string
 	URL    string
-}
-
-type ApiParam struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
 }
 
 var ApiArray []Api
@@ -118,6 +117,7 @@ var appConfig AppConfig
 var adminManager AdminManager
 var statManager StatManager
 var cacheManager CacheManager
+var pluginManager PluginManager
 var hookManager HookManager
 var appManager AppManager
 var requestClient = &http.Client{
@@ -167,12 +167,14 @@ func Start(appDir string) {
 
 	// 重载信号
 	signalsChannel := make(chan os.Signal, 1024)
-	signal.Notify(signalsChannel, syscall.SIGINT, syscall.SIGHUP)
+	signal.Notify(signalsChannel, syscall.SIGINT, syscall.SIGHUP, syscall.SIGTERM)
 	go func() {
 		for {
 			sig := <-signalsChannel
 			if sig == syscall.SIGHUP {
 				appManager.reload()
+			} else if sig == syscall.SIGTERM {
+				pluginManager.Stop()
 			} else {
 				pidFile := appManager.AppDir + "/data/pid"
 				exist, _ := FileExists(pidFile)
@@ -200,7 +202,7 @@ func Start(appDir string) {
 	// 加载数据
 	appManager.reload()
 
-	//启动Server
+	// 启动Server
 	go func() {
 		err = nil
 		if len(appConfig.SSL.Key) == 0 || len(appConfig.SSL.Cert) == 0 {
@@ -226,12 +228,26 @@ func Start(appDir string) {
 	// 启动缓存
 	cacheManager.init()
 
+	// 启动插件
+	pluginManager.Init()
+	pluginManager.Start(appDir)
+
 	// 等待请求
 	appManager.wait()
 }
 
+// 取得App管理器
+func GetAppManager() *AppManager {
+	return &appManager
+}
+
+// 取得插件管理器
+func GetPluginManager() *PluginManager {
+	return &pluginManager
+}
+
 // 取得钩子管理器
-func GetHookManager() (*HookManager) {
+func GetHookManager() *HookManager {
 	return &hookManager
 }
 
@@ -280,7 +296,7 @@ func (manager *AppManager) isCommand() (isCommand bool) {
 
 // 在后端运行
 func (manager *AppManager) startCommand() {
-	//是否已经有进程
+	// 是否已经有进程
 	running, pid := manager.checkProcessRunning()
 	if running {
 		log.Fatal("the proccess is already running, pid:", pid)
@@ -306,6 +322,13 @@ func (manager *AppManager) stopCommand() {
 		log.Fatal(err)
 		return
 	}
+
+	err = process.Signal(syscall.SIGTERM)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	time.Sleep(1 * time.Second)
 
 	err = process.Kill()
 	if err != nil {
@@ -462,7 +485,7 @@ func (manager *AppManager) reload() {
 	// 应用配置
 	manager.loadAppConfig()
 
-	//服务器配置
+	// 服务器配置
 	servers := appManager.loadServers()
 	ApiArray = []Api{}
 	appManager.loadApis(manager.AppDir+string(os.PathSeparator)+"apis", servers, &ApiArray)
@@ -502,7 +525,7 @@ func (manager *AppManager) reload() {
 		})
 	}
 
-	//处理路径
+	// 处理路径
 	for _, api := range ApiArray {
 		log.Println("load api '" + api.Path + "' from '" + strings.TrimPrefix(api.File, manager.AppDir+string(os.PathSeparator)+"apis"+string(os.PathSeparator)) + "'")
 
@@ -523,15 +546,18 @@ func (manager *AppManager) reload() {
 		}(api)
 	}
 
-	//刷新管理数据
+	// 刷新管理数据
 	adminManager.Reload()
+
+	// 刷新插件
+	pluginManager.Reload()
 }
 
 // 等待处理请求
 func (manager *AppManager) wait() {
 	defer statManager.closeDb()
 
-	//Hold住进程
+	// Hold住进程
 	var wg = sync.WaitGroup{}
 	wg.Add(1)
 	wg.Wait()
@@ -618,7 +644,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 			continue
 		}
 
-		//跳过假数据
+		// 跳过假数据
 		if dataReg.MatchString(file.Name()) {
 			continue
 		}
@@ -701,7 +727,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 				}
 
 				weight := int(host.Weight * 10 / totalWeight)
-				for i := 0; i < weight; i ++ {
+				for i := 0; i < weight; i++ {
 					api.Addresses = append(api.Addresses, ApiAddress{
 						Server: server.Code,
 						Host:   host.Address,
@@ -711,7 +737,7 @@ func (manager *AppManager) loadApis(apiDir string, servers []Server, apis *[]Api
 			}
 		}
 
-		//假数据
+		// 假数据
 		fileName := file.Name()
 		reg, _ := ReuseRegexpCompile("\\.json")
 		dataFileName := apiDir + string(os.PathSeparator) + reg.ReplaceAllString(fileName, ".mock.json")
@@ -793,14 +819,14 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 
 	query := request.URL.RawQuery
 
-	//判断最大内容长度
+	// 判断最大内容长度
 	if api.maxSizeBits > 0 && float64(request.ContentLength) > api.maxSizeBits {
 		request.ParseMultipartForm(2 << 10)
 		http.Error(writer, "request body too large to upload", http.StatusRequestEntityTooLarge)
 		return
 	}
 
-	//是否有缓存
+	// 是否有缓存
 	cacheKey := request.URL.RequestURI()
 	cacheEntry, ok := cacheManager.get(cacheKey)
 	if ok {
@@ -840,14 +866,14 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 	request.Header.Set("Meloy-Api", "1.0")
 	newRequest.Body = request.Body
 
-	//超时时间
+	// 超时时间
 	if api.timeoutDuration > 0 {
 		requestClient.Timeout = api.timeoutDuration
 	} else {
 		requestClient.Timeout = 30 * time.Second
 	}
 
-	//是否正在watch
+	// 是否正在watch
 	var isWatching = false
 	if appConfig.isWatching {
 		if appConfig.watchingAt > time.Now().Unix()-60 {
@@ -892,22 +918,22 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		log.Println("Error:" + err.Error())
 		hookManager.afterHook(hookContext, nil, err)
 
-		//统计
+		// 统计
 		statManager.send(address, api.Path, request.RequestURI, (time.Now().UnixNano()-t)/1000000, 1, 0)
 		return
 	}
 
-	//监控日志
+	// 监控日志
 	if isWatching {
 		if requestCopy != nil {
 			statManager.sendRequest(resp, requestCopy)
 		}
 	}
 
-	//调用钩子
+	// 调用钩子
 	hookManager.afterHook(hookContext, resp, nil)
 
-	//分析头部指令等信息
+	// 分析头部指令等信息
 	apiConfig := ApiConfig{
 		cacheTags: []string{"$MeloyAPI$" + api.Path},
 	}
@@ -930,19 +956,19 @@ func (manager *AppManager) handleMethod(writer http.ResponseWriter, request *htt
 		return
 	}
 
-	//缓存
+	// 缓存
 	if apiConfig.cacheLifeMs > 0 {
 		cacheManager.set(cacheKey, apiConfig.cacheTags, _bytes, writer.Header(), apiConfig.cacheLifeMs)
 	}
 
-	//如果不是异步请求的，就返回请求得到的数据
+	// 如果不是异步请求的，就返回请求得到的数据
 	if !api.IsAsynchronous {
 		writer.Write(_bytes)
 	}
 
 	var errors int64 = 0
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		errors ++
+		errors++
 		log.Println("Error: api return ", resp.Status)
 	}
 
@@ -962,7 +988,7 @@ func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, requ
 			continue
 		}
 
-		//处理指令
+		// 处理指令
 		if directiveReg.MatchString(key) {
 			directive := directiveReg.FindStringSubmatch(key)[1]
 			manager.processDirective(request, address, api.Path, directive, values[0], apiConfig)
@@ -981,7 +1007,7 @@ func (manager *AppManager) parseResponseHeaders(writer http.ResponseWriter, requ
 
 // 处理指令
 func (manager *AppManager) processDirective(request *http.Request, address ApiAddress, path string, directive string, value string, apiConfig *ApiConfig) {
-	//调试信息
+	// 调试信息
 	{
 		reg, _ := ReuseRegexpCompile("^Debug")
 		if reg.MatchString(directive) {
@@ -990,7 +1016,7 @@ func (manager *AppManager) processDirective(request *http.Request, address ApiAd
 		}
 	}
 
-	//设置缓存时间
+	// 设置缓存时间
 	{
 		reg, _ := ReuseRegexpCompile("^Cache-Life-Ms")
 		if reg.MatchString(directive) {
@@ -1004,7 +1030,7 @@ func (manager *AppManager) processDirective(request *http.Request, address ApiAd
 		}
 	}
 
-	//设置缓存标签
+	// 设置缓存标签
 	{
 		reg, _ := ReuseRegexpCompile("^Cache-Tag")
 		if reg.MatchString(directive) {
@@ -1017,7 +1043,7 @@ func (manager *AppManager) processDirective(request *http.Request, address ApiAd
 		}
 	}
 
-	//设置要删除的缓存标签
+	// 设置要删除的缓存标签
 	{
 		reg, _ := ReuseRegexpCompile("^Cache-Delete")
 		if reg.MatchString(directive) {
@@ -1128,19 +1154,19 @@ func (manager *AppManager) validateRequest(request *http.Request) bool {
 	reg, _ := ReuseRegexpCompile(":\\d+$")
 	ip := reg.ReplaceAllString(request.RemoteAddr, "")
 
-	//本地的
+	// 本地的
 	if appConfig.Host == "0.0.0.0" && ip == "[::1]" {
 		return true
 	}
 
-	//禁止的
+	// 禁止的
 	if appConfig.hasDeny {
 		if containsString(appConfig.Deny.Clients, ip) {
 			return false
 		}
 	}
 
-	//支持的
+	// 支持的
 	if appConfig.hasAllow {
 		if !containsString(appConfig.Allow.Clients, ip) {
 			return false
@@ -1168,7 +1194,7 @@ func (manager *AppManager) reachLimit() bool {
 		if appConfig.limitMinuteLeft <= 0 {
 			return true
 		}
-		appConfig.limitMinuteLeft --
+		appConfig.limitMinuteLeft--
 	}
 
 	if appConfig.hasDayLimit {
@@ -1181,7 +1207,7 @@ func (manager *AppManager) reachLimit() bool {
 		if appConfig.limitDayLeft <= 0 {
 			return true
 		}
-		appConfig.limitDayLeft --
+		appConfig.limitDayLeft--
 	}
 
 	return false
@@ -1189,7 +1215,7 @@ func (manager *AppManager) reachLimit() bool {
 
 // 设置API头部信息
 func (manager *AppManager) setApiHeaders(writer http.ResponseWriter, api *Api) {
-	//写入Headers
+	// 写入Headers
 	if len(api.Headers) == 0 {
 		return
 	}

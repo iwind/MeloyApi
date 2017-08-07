@@ -1,29 +1,29 @@
 package MeloyApi
 
 import (
-	"time"
-	"regexp"
-	"log"
-	"encoding/json"
 	"encoding/base64"
-	"strings"
+	"encoding/json"
+	"log"
 	"reflect"
+	"regexp"
+	"strings"
+	"time"
 )
 
 // API定义
 type Api struct {
 	IsEnabled bool `json:"isEnabled"`
 
-	Pattern string `json:"pattern"`
-	Path    string `json:"path"`
-	Address string `json:"address"`
+	Pattern string   `json:"pattern"`
+	Path    string   `json:"path"`
+	Address string   `json:"address"`
 	Methods []string `json:"methods"`
 
 	IsAsynchronous bool
-	Response struct {
-		String string `json:"string"`
-		Binary string `json:"binary"`
-		XML    string `json:"xml"`
+	Response       struct {
+		String string      `json:"string"`
+		Binary string      `json:"binary"`
+		XML    string      `json:"xml"`
 		JSON   interface{} `json:"json"`
 	}
 
@@ -35,21 +35,25 @@ type Api struct {
 	Timeout string `json:"timeout"`
 	MaxSize string `json:"maxSize"`
 
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Params       []ApiParam `json:"params"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Params      []struct {
+		Name        string `json:"name"`
+		Type        string `json:"type"`
+		Description string `json:"description"`
+	} `json:"params"`
 	Dones        []string `json:"dones"`
 	Todos        []string `json:"todos"`
-	IsDeprecated bool `json:"isDeprecated"`
-	Version      string `json:"version"`
+	IsDeprecated bool     `json:"isDeprecated"`
+	Version      string   `json:"version"`
 
 	Roles   []string `json:"roles"`
-	Author  string `json:"author"`
-	Company string `json:"company"`
+	Author  string   `json:"author"`
+	Company string   `json:"company"`
 
 	Addresses []ApiAddress `json:"availableAddresses"`
-	File      string `json:"file"`
-	Mock      string `json:"mock"`
+	File      string       `json:"file"`
+	Mock      string       `json:"mock"`
 
 	Stat ApiStat `json:"stat"`
 
@@ -171,7 +175,7 @@ func (api *Api) copyFrom(from Api) {
 
 	countFields := value.Elem().NumField()
 
-	for i := 0; i < countFields; i ++ {
+	for i := 0; i < countFields; i++ {
 		fieldValue := value2.Field(i)
 		fieldName := fieldType.Field(i).Name
 
