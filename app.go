@@ -107,9 +107,9 @@ type ApiConfig struct {
 
 // API地址
 type ApiAddress struct {
-	Server string
-	Host   string
-	URL    string
+	Server string `json:"server"`
+	Host   string `json:"host"`
+	URL    string `json:"url"`
 }
 
 var ApiArray []Api

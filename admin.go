@@ -13,6 +13,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"bytes"
+	"net/http/httputil"
+	"io"
+	"compress/gzip"
 )
 
 type AdminManager struct {
@@ -21,7 +25,7 @@ type AdminManager struct {
 type AdminConfig struct {
 	Host string
 	Port int
-	SSL  struct {
+	SSL struct {
 		Cert string
 		Key  string
 	}
@@ -183,6 +187,7 @@ func (manager *AdminManager) handleRequest(writer http.ResponseWriter, request *
 		}
 	}
 
+	// API某天统计
 	{
 		reg, _ := regexp.Compile("^/@api/\\[(.+)]/year/(\\d+)/month/(\\d+)/day/(\\d+)$")
 		matches := reg.FindStringSubmatch(path)
@@ -191,6 +196,41 @@ func (manager *AdminManager) handleRequest(writer http.ResponseWriter, request *
 			month, _ := strconv.Atoi(matches[3])
 			day, _ := strconv.Atoi(matches[4])
 			manager.handleApiDay(writer, request, matches[1], year, month, day)
+			return
+		}
+	}
+
+	// API请求测试
+	{
+		reg, _ := regexp.Compile("^/@api/\\[(.+)]/request/host/(\\d+)$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			var hostIndex, _ = strconv.Atoi(matches[2])
+			manager.handleApiRequest(writer, request, matches[1], hostIndex)
+			return
+		}
+	}
+
+	// API基准测试
+	{
+		reg, _ := regexp.Compile("^/@api/\\[(.+)]/benchmark$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			var path = matches[1]
+			manager.handleApiBenchmark(writer, request, path, 0, 2000, 100)
+			return
+		}
+	}
+
+	{
+		reg, _ := regexp.Compile("^/@api/\\[(.+)]/benchmark/host/(\\d+)/requests/(\\d+)/concurrency/(\\d+)$")
+		matches := reg.FindStringSubmatch(path)
+		if len(matches) > 0 {
+			var path = matches[1]
+			var hostIndex, _ = strconv.Atoi(matches[2])
+			var requests, _ = strconv.Atoi(matches[3])
+			var concurrency, _ = strconv.Atoi(matches[4])
+			manager.handleApiBenchmark(writer, request, path, hostIndex, requests, concurrency)
 			return
 		}
 	}
@@ -356,7 +396,7 @@ func (manager *AdminManager) handleApi(writer http.ResponseWriter, request *http
 	}
 }
 
-// /@api/path/year/:year/month/:month/day/:day
+// /@api/[:path]/year/:year/month/:month/day/:day
 // 日统计
 func (manager *AdminManager) handleApiDay(writer http.ResponseWriter, request *http.Request, path string, year int, month int, day int) {
 	apiStat := statManager.findAvgStatForDay(path, year, month, day)
@@ -373,6 +413,231 @@ func (manager *AdminManager) handleApiDay(writer http.ResponseWriter, request *h
 			"minutes":  minutes,
 		},
 	})
+}
+
+// /@api/[:path]/host/:hostIndex
+// 基准测试
+func (manager *AdminManager) handleApiRequest(writer http.ResponseWriter, request *http.Request, path string, hostIndex int) {
+	api, ok := adminApiMapping[path]
+	if !ok {
+		manager.printJSON(writer, request, Map{
+			"code":    404,
+			"message": "Not found",
+			"data":    nil,
+		})
+	} else if len(api.Addresses) == 0 {
+		manager.printJSON(writer, request, Map{
+			"code":    500,
+			"message": "No api address to use",
+			"data":    nil,
+		})
+	} else {
+		var bodyBytes, err = ioutil.ReadAll(request.Body)
+		request.Body.Close()
+		if err != nil {
+			manager.printJSON(writer, request, Map{
+				"code":    500,
+				"message": err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+		var body = string(bodyBytes)
+		if len(body) == 0 {
+			body = request.Form.Encode()
+		}
+		var header = request.Header
+		for key := range header {
+			if key == "Connection" {
+				header.Del(key)
+			}
+		}
+		var url string
+		if hostIndex < -1 || hostIndex >= api.countAddresses {
+			manager.printJSON(writer, request, Map{
+				"code":    405,
+				"message": "Invalid host index",
+				"data":    nil,
+			})
+			return
+		}
+
+		url = api.Addresses[hostIndex].URL
+
+		if len(request.URL.RawQuery) > 0 {
+			if strings.Contains(url, "?") {
+				url += "&" + request.URL.RawQuery
+			} else {
+				url += "?" + request.URL.RawQuery
+			}
+		}
+
+		var client = &http.Client{}
+		newRequest, err := http.NewRequest(request.Method, url, bytes.NewReader([]byte(body)))
+		if err != nil {
+			manager.printJSON(writer, request, Map{
+				"code":    500,
+				"message": err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+
+		if newRequest.Method == "POST" {
+			newRequest.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		}
+
+		newRequest.Header.Set("User-Agent", "MeloyAPI Benchmark")
+
+		for key, values := range header {
+			for _, value := range values {
+				newRequest.Header.Set(key, value)
+			}
+		}
+
+		var now = time.Now().UnixNano()
+		response, err := client.Do(newRequest)
+
+		defer response.Body.Close()
+
+		responseBytes, err := httputil.DumpResponse(response, false)
+		if err != nil {
+			manager.printJSON(writer, request, Map{
+				"code":    500,
+				"message": err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+
+		var reader io.ReadCloser
+		switch response.Header.Get("Content-Encoding") {
+		case "gzip":
+			reader, err = gzip.NewReader(response.Body)
+			if err == nil {
+				defer reader.Close()
+			}
+		default:
+			reader = response.Body
+			defer reader.Close()
+		}
+		responseBodyBytes, _ := ioutil.ReadAll(reader)
+		var responseString = string(responseBytes) + string(responseBodyBytes)
+
+		var ns = time.Now().UnixNano() - now
+
+		if err != nil {
+			manager.printJSON(writer, request, Map{
+				"code":    500,
+				"message": err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+
+		manager.printJSON(writer, request, Map{
+			"code":    200,
+			"message": nil,
+			"data": Map{
+				"costMs":   float32(ns) / 1000000,
+				"response": responseString,
+			},
+		})
+	}
+}
+
+// /@api/[:path]/benchmark/requests/:requests/concurrency/:concurrency
+// 基准测试
+func (manager *AdminManager) handleApiBenchmark(writer http.ResponseWriter, request *http.Request, path string, hostIndex int, requests int, concurrency int) {
+	if requests <= 0 {
+		requests = 2000
+	}
+	if concurrency <= 0 {
+		concurrency = 100
+	}
+
+	api, ok := adminApiMapping[path]
+	if !ok {
+		manager.printJSON(writer, request, Map{
+			"code":    404,
+			"message": "Not found",
+			"data":    nil,
+		})
+	} else if len(api.Addresses) == 0 {
+		manager.printJSON(writer, request, Map{
+			"code":    500,
+			"message": "No api address to use",
+			"data":    nil,
+		})
+	} else {
+		var benchmarkManager = BenchmarkManager{}
+		var bodyBytes, err = ioutil.ReadAll(request.Body)
+		request.Body.Close()
+		if err != nil {
+			manager.printJSON(writer, request, Map{
+				"code":    500,
+				"message": err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+		var body = string(bodyBytes)
+		if len(body) == 0 {
+			body = request.Form.Encode()
+		}
+		var header = request.Header
+		for key := range header {
+			if key == "Connection" {
+				header.Del(key)
+			}
+		}
+		var url string
+		if hostIndex < -1 || hostIndex >= api.countAddresses {
+			manager.printJSON(writer, request, Map{
+				"code":    405,
+				"message": "Invalid host index",
+				"data":    nil,
+			})
+			return
+		}
+
+		url = api.Addresses[hostIndex].URL
+
+		if len(request.URL.RawQuery) > 0 {
+			if strings.Contains(url, "?") {
+				url += "&" + request.URL.RawQuery
+			} else {
+				url += "?" + request.URL.RawQuery
+			}
+		}
+
+		successRequests, failRequests, requestsPerSecond, avgMs, err := benchmarkManager.test(url, request.Method, header, body, requests, concurrency)
+
+		if err != nil {
+			manager.printJSON(writer, request, Map{
+				"code":    500,
+				"message": err.Error(),
+				"data":    nil,
+			})
+			return
+		}
+
+		manager.printJSON(writer, request, Map{
+			"code":    200,
+			"message": "Success",
+			"data": Map{
+				"url":         url,
+				"requests":    requests,
+				"concurrency": concurrency,
+				"result": Map{
+					"success":           successRequests,
+					"fail":              failRequests,
+					"requestsPerSecond": requestsPerSecond,
+					"msPerRequest":      avgMs,
+				},
+			},
+		})
+	}
 }
 
 // /@api/[:path]/delete
